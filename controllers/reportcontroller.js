@@ -16,19 +16,25 @@ const {
 // REPORT FILE UPLOAD
 // =========================================================
 
-const uploadDir = path.join(
-    __dirname,
-    "../uploads/reports"
-);
+const uploadDir = process.env.NODE_ENV === "production"
+    ? path.join("/tmp", "reports")
+    : path.join(__dirname, "../uploads/reports");
 
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, {
-        recursive: true,
-    });
+// Safely attempt folder creation
+try {
+    if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+    }
+} catch (err) {
+    console.warn("Could not create upload directory synchronously:", err.message);
 }
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
+        // Ensure directory exists right before saving the file
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
         cb(null, uploadDir);
     },
 
