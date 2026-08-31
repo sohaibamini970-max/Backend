@@ -1,8 +1,7 @@
+// routes/reportRoutes.js
 const express = require("express");
-
-const router = express.Router();
-
-const {
+const { 
+    reportUpload,  // ✅ From controller
     getReportOverview,
     getProjectReport,
     createOrUpdateReport,
@@ -10,67 +9,19 @@ const {
     uploadProjectReportFile,
 } = require("../controllers/reportcontroller");
 
-const { authenticate } = require("../middleware/authMiddleware");
+const router = express.Router();
 
-const reportUpload = require("../middleware/reportUpload");
+// GET routes
+router.get("/", getReportOverview);
+router.get("/project/:projectId", getProjectReport);
+router.get("/project/:projectId/download/:format", downloadReport);
 
-// ---------------------------------------------------------
-// GET REPORT OVERVIEW
-// GET /api/reports
-// ---------------------------------------------------------
-
-router.get(
-    "/",
-    authenticate,
-    getReportOverview
-);
-
-// ---------------------------------------------------------
-// GET SINGLE PROJECT REPORT
-// GET /api/reports/project/:projectId
-// ---------------------------------------------------------
-
-router.get(
-    "/project/:projectId",
-    authenticate,
-    getProjectReport
-);
-
-// ---------------------------------------------------------
-// CREATE / UPDATE PROJECT REPORT
-// POST /api/reports/project/:projectId
-// ---------------------------------------------------------
-
-router.post(
-    "/project/:projectId",
-    authenticate,
-    createOrUpdateReport
-);
-
-// ---------------------------------------------------------
-// UPLOAD PROJECT REPORT FILE
-// POST /api/reports/project/:projectId/upload
-// ---------------------------------------------------------
-
+// POST routes
+router.post("/project/:projectId", createOrUpdateReport);
 router.post(
     "/project/:projectId/upload",
-    authenticate,
-    reportUpload.single("file"),
+    reportUpload.single("file"),  // ✅ Using the one from controller
     uploadProjectReportFile
 );
 
-// ---------------------------------------------------------
-// DOWNLOAD PROJECT REPORT
-// GET /api/reports/project/:projectId/download/pdf
-// GET /api/reports/project/:projectId/download/word
-// ---------------------------------------------------------
-
-router.get(
-    "/project/:projectId/download/:format",
-    authenticate,
-    downloadReport
-);
-
 module.exports = router;
-
-
