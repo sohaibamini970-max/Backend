@@ -905,15 +905,16 @@ const uploadProjectReportFile =
 // GET /api/reports/project/:projectId/download/word
 // =========================================================
 
-const downloadReport = async (
-    req,
-    res
-) => {
+const downloadReport = async (req, res) => {
     try {
         const {
             projectId,
             format,
         } = req.params;
+
+        // =================================================
+        // VALIDATE FORMAT
+        // =================================================
 
         const requestedFormat =
             format === "pdf"
@@ -925,87 +926,91 @@ const downloadReport = async (
         if (!requestedFormat) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Invalid report format",
+                message: "Invalid report format",
             });
         }
 
-        const user =
-            await getCurrentUser(
-                req.user.id
-            );
+        // =================================================
+        // GET CURRENT USER
+        // =================================================
+
+        const user = await getCurrentUser(
+            req.user.id
+        );
 
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message:
-                    "User not found",
+                message: "User not found",
             });
         }
 
         if (!user.is_active) {
             return res.status(403).json({
                 success: false,
-                message:
-                    "Your account is inactive",
+                message: "Your account is inactive",
             });
         }
 
-        // IMPORTANT:
+        // =================================================
+        // ROLE BASED PROJECT ACCESS
         //
         // $1 = projectId
-        // $2 = userId for PM/Member
-        //
-        // This fixes:
-        //
-        // bind message supplies 2 parameters,
-        // but prepared statement requires 1
-        const access =
-            buildProjectAccess(
-                user.role,
-                user.id,
-                2
-            );
+        // $2 = userId for PM / Member
+        // =================================================
 
-        const result =
-            await pool.query(
-                `
-                SELECT
-                    p.id AS project_id,
-                    p.name AS project_name,
-                    p.status,
-                    p.priority,
-                    p.start_date,
-                    p.deadline,
-                    p.progress,
+        const access = buildProjectAccess(
+            user.role,
+            user.id,
+            2
+        );
 
-                    manager.full_name
-                        AS manager_name,
+        // =================================================
+        // GET PROJECT + REPORT
+        // =================================================
 
-                    r.title,
-                    r.content,
-                    r.format,
-                    r.created_at,
-                    r.updated_at
+        const result = await pool.query(
+            `
+            SELECT
+                p.id AS project_id,
+                p.name AS project_name,
+                p.status,
+                p.priority,
+                p.start_date,
+                p.deadline,
+                p.progress,
 
-                FROM projects p
+                manager.full_name
+                    AS manager_name,
 
-                INNER JOIN project_reports r
-                    ON r.project_id = p.id
+                r.title,
+                r.content,
+                r.format,
+                r.created_at,
+                r.updated_at
 
-                LEFT JOIN users manager
-                    ON manager.id =
-                        p.project_manager_id
+            FROM projects p
 
-                WHERE p.id = $1
+            INNER JOIN project_reports r
+                ON r.project_id = p.id
 
-                ${access.sql}
-                `,
-                [
-                    projectId,
-                    ...access.params,
-                ]
-            );
+            LEFT JOIN users manager
+                ON manager.id =
+                    p.project_manager_id
+
+            WHERE p.id = $1
+
+            ${access.sql}
+            `,
+            [
+                projectId,
+                ...access.params,
+            ]
+        );
+
+        // =================================================
+        // REPORT NOT FOUND
+        // =================================================
 
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -1015,30 +1020,156 @@ const downloadReport = async (
             });
         }
 
-        const report =
-            result.rows[0];
+        const report = result.rows[0];
 
         // =================================================
-        // PDF
+        // CLEAN VALUES
         // =================================================
 
-        if (
-            requestedFormat ===
-            "PDF"
-        ) {
-            const doc =
-                new PDFDocument({
-                    margin: 50,
+        const projectName =
+            report.project_name ||
+            "Project";
+
+        const reportTitle =
+            report.title ||
+            "Project Report";
+
+        const reportContent =
+            report.content ||
+            "No report content";
+
+        const managerName =
+            report.manager_name ||
+            "Unassigned";
+
+        const status =
+            report.status ||
+            "N/A";
+
+        const priority =
+            report.priority ||
+            "N/A";
+
+        const progress =
+            report.progress || 0;
+
+        const startDate =
+            report.start_date ||
+            "N/A";
+
+        const deadline =
+            report.deadline ||
+            "N/A";
+
+        // =================================================
+        // SAFE FILE NAME
+        // =================================================
+
+        const safeProjectName =
+            projectName
+                .toString()
+                .replace(
+                    /[^a-zA-Z0-9_-]/g,
+                    "_"
+                )
+                .toLowerCase();
+
+        // =================================================
+        // PDF DOWNLOAD
+        // =================================================
+
+        if (requestedFormat === "PDF") {
+
+            /*
+             * IMPORTANT FOR VERCEL
+             *
+             * Do NOT use:
+             *
+             * .font("Helvetica")
+             * .font("Helvetica-Bold")
+             *
+             * PDFKit tries to load its internal
+             * standard-font files and Vercel can fail
+             * with:
+             *
+             * Cannot find module:
+             * pdfkit/js/standard-fonts/Helvetica.cjs
+             *
+             * Therefore we use real TTF fonts bundled
+             * inside the project.
+             */
+
+            const regularFont = path.join(
+                process.cwd(),
+                "fonts",
+                "DejaVuSans.ttf"
+            );
+
+            const boldFont = path.join(
+                process.cwd(),
+                "fonts",
+                "DejaVuSans-Bold.ttf"
+            );
+
+            // ---------------------------------------------
+            // CHECK FONT FILES
+            // ---------------------------------------------
+
+            if (!fs.existsSync(regularFont)) {
+                console.error(
+                    "PDF regular font not found:",
+                    regularFont
+                );
+
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "PDF font file is missing on the server",
                 });
+            }
+
+            if (!fs.existsSync(boldFont)) {
+                console.error(
+                    "PDF bold font not found:",
+                    boldFont
+                );
+
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "PDF bold font file is missing on the server",
+                });
+            }
+
+            // ---------------------------------------------
+            // CREATE PDF
+            // ---------------------------------------------
+
+            const doc = new PDFDocument({
+                margin: 50,
+                size: "A4",
+            });
+
+            // ---------------------------------------------
+            // REGISTER TTF FONTS
+            // ---------------------------------------------
+
+            doc.registerFont(
+                "ReportRegular",
+                regularFont
+            );
+
+            doc.registerFont(
+                "ReportBold",
+                boldFont
+            );
 
             const filename =
-                `${report.project_name}`
-                    .replace(
-                        /[^a-z0-9]/gi,
-                        "_"
-                    )
-                    .toLowerCase() +
-                "_report.pdf";
+                `${safeProjectName}_report.pdf`;
+
+            // ---------------------------------------------
+            // RESPONSE HEADERS
+            // ---------------------------------------------
 
             res.setHeader(
                 "Content-Type",
@@ -1050,83 +1181,104 @@ const downloadReport = async (
                 `attachment; filename="${filename}"`
             );
 
+            res.setHeader(
+                "Cache-Control",
+                "no-store"
+            );
+
+            // ---------------------------------------------
+            // PIPE PDF TO RESPONSE
+            // ---------------------------------------------
+
             doc.pipe(res);
 
+            // ---------------------------------------------
+            // TITLE
+            // ---------------------------------------------
+
             doc
+                .font("ReportBold")
                 .fontSize(22)
-                .font(
-                    "Helvetica-Bold"
-                )
                 .text(
-                    report.title
+                    reportTitle,
+                    {
+                        align: "left",
+                    }
                 );
 
             doc.moveDown();
 
+            // ---------------------------------------------
+            // PROJECT INFORMATION
+            // ---------------------------------------------
+
             doc
-                .fontSize(11)
-                .font("Helvetica")
-                .text(
-                    `Project: ${report.project_name}`
-                );
+                .font("ReportRegular")
+                .fontSize(11);
 
             doc.text(
-                `Project Manager: ${
-                    report.manager_name ||
-                    "Unassigned"
-                }`
+                `Project: ${projectName}`
             );
 
             doc.text(
-                `Status: ${report.status}`
+                `Project Manager: ${managerName}`
             );
 
             doc.text(
-                `Priority: ${report.priority}`
+                `Status: ${status}`
             );
 
             doc.text(
-                `Progress: ${
-                    report.progress ||
-                    0
-                }%`
+                `Priority: ${priority}`
             );
 
             doc.text(
-                `Start Date: ${
-                    report.start_date ||
-                    "N/A"
-                }`
+                `Progress: ${progress}%`
             );
 
             doc.text(
-                `Deadline: ${
-                    report.deadline ||
-                    "N/A"
-                }`
+                `Start Date: ${startDate}`
+            );
+
+            doc.text(
+                `Deadline: ${deadline}`
             );
 
             doc.moveDown();
 
+            // ---------------------------------------------
+            // REPORT HEADING
+            // ---------------------------------------------
+
             doc
+                .font("ReportBold")
                 .fontSize(14)
-                .font(
-                    "Helvetica-Bold"
-                )
                 .text("Report");
 
             doc.moveDown();
 
+            // ---------------------------------------------
+            // REPORT CONTENT
+            // ---------------------------------------------
+
             doc
+                .font("ReportRegular")
                 .fontSize(11)
-                .font("Helvetica")
                 .text(
-                    report.content ||
-                    "No report content",
+                    reportContent,
                     {
                         lineGap: 4,
+                        width:
+                            doc.page.width -
+                            doc.page.margins.left -
+                            doc.page.margins.right,
+                        align: "left",
                     }
                 );
+
+            // ---------------------------------------------
+            // FINISH PDF
+            // ---------------------------------------------
 
             doc.end();
 
@@ -1134,169 +1286,254 @@ const downloadReport = async (
         }
 
         // =================================================
-        // WORD
+        // WORD DOWNLOAD
         // =================================================
 
-        const children = [
-            new Paragraph({
-                text:
-                    report.title,
-                heading:
-                    HeadingLevel.TITLE,
-            }),
+        if (requestedFormat === "Word") {
 
-            new Paragraph({
-                children: [
-                    new TextRun({
-                        text:
-                            "Project: ",
-                        bold: true,
-                    }),
+            const children = [
+                // -----------------------------------------
+                // TITLE
+                // -----------------------------------------
 
-                    new TextRun(
-                        report.project_name
-                    ),
-                ],
-            }),
+                new Paragraph({
+                    text: reportTitle,
+                    heading:
+                        HeadingLevel.TITLE,
+                }),
 
-            new Paragraph({
-                children: [
-                    new TextRun({
-                        text:
-                            "Project Manager: ",
-                        bold: true,
-                    }),
+                // -----------------------------------------
+                // PROJECT
+                // -----------------------------------------
 
-                    new TextRun(
-                        report.manager_name ||
-                            "Unassigned"
-                    ),
-                ],
-            }),
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text: "Project: ",
+                            bold: true,
+                        }),
 
-            new Paragraph({
-                children: [
-                    new TextRun({
-                        text:
-                            "Status: ",
-                        bold: true,
-                    }),
+                        new TextRun(
+                            projectName
+                        ),
+                    ],
+                }),
 
-                    new TextRun(
-                        report.status ||
-                            "N/A"
-                    ),
-                ],
-            }),
+                // -----------------------------------------
+                // PROJECT MANAGER
+                // -----------------------------------------
 
-            new Paragraph({
-                children: [
-                    new TextRun({
-                        text:
-                            "Priority: ",
-                        bold: true,
-                    }),
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text:
+                                "Project Manager: ",
+                            bold: true,
+                        }),
 
-                    new TextRun(
-                        report.priority ||
-                            "N/A"
-                    ),
-                ],
-            }),
+                        new TextRun(
+                            managerName
+                        ),
+                    ],
+                }),
 
-            new Paragraph({
-                children: [
-                    new TextRun({
-                        text:
-                            "Progress: ",
-                        bold: true,
-                    }),
+                // -----------------------------------------
+                // STATUS
+                // -----------------------------------------
 
-                    new TextRun(
-                        `${
-                            report.progress ||
-                            0
-                        }%`
-                    ),
-                ],
-            }),
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text: "Status: ",
+                            bold: true,
+                        }),
 
-            new Paragraph({
-                text: "",
-            }),
+                        new TextRun(
+                            status
+                        ),
+                    ],
+                }),
 
-            new Paragraph({
-                text: "Report",
-                heading:
-                    HeadingLevel.HEADING_1,
-            }),
-        ];
+                // -----------------------------------------
+                // PRIORITY
+                // -----------------------------------------
 
-        const contentLines =
-            (
-                report.content ||
-                "No report content"
-            ).split("\n");
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text: "Priority: ",
+                            bold: true,
+                        }),
 
-        contentLines.forEach(
-            (line) => {
-                children.push(
-                    new Paragraph({
-                        children: [
-                            new TextRun(
-                                line
-                            ),
-                        ],
-                    })
-                );
-            }
-        );
+                        new TextRun(
+                            priority
+                        ),
+                    ],
+                }),
 
-        const document =
-            new Document({
-                sections: [
-                    {
-                        children,
-                    },
-                ],
-            });
+                // -----------------------------------------
+                // PROGRESS
+                // -----------------------------------------
 
-        const buffer =
-            await Packer.toBuffer(
-                document
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text: "Progress: ",
+                            bold: true,
+                        }),
+
+                        new TextRun(
+                            `${progress}%`
+                        ),
+                    ],
+                }),
+
+                // -----------------------------------------
+                // START DATE
+                // -----------------------------------------
+
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text:
+                                "Start Date: ",
+                            bold: true,
+                        }),
+
+                        new TextRun(
+                            String(startDate)
+                        ),
+                    ],
+                }),
+
+                // -----------------------------------------
+                // DEADLINE
+                // -----------------------------------------
+
+                new Paragraph({
+                    children: [
+                        new TextRun({
+                            text:
+                                "Deadline: ",
+                            bold: true,
+                        }),
+
+                        new TextRun(
+                            String(deadline)
+                        ),
+                    ],
+                }),
+
+                // -----------------------------------------
+                // SPACING
+                // -----------------------------------------
+
+                new Paragraph({
+                    text: "",
+                }),
+
+                // -----------------------------------------
+                // REPORT HEADING
+                // -----------------------------------------
+
+                new Paragraph({
+                    text: "Report",
+                    heading:
+                        HeadingLevel.HEADING_1,
+                }),
+            ];
+
+            // ---------------------------------------------
+            // REPORT CONTENT
+            // ---------------------------------------------
+
+            const contentLines =
+                String(reportContent)
+                    .split(/\r?\n/);
+
+            contentLines.forEach(
+                (line) => {
+                    children.push(
+                        new Paragraph({
+                            children: [
+                                new TextRun(
+                                    line
+                                ),
+                            ],
+                        })
+                    );
+                }
             );
 
-        const filename =
-            `${report.project_name}`
-                .replace(
-                    /[^a-z0-9]/gi,
-                    "_"
-                )
-                .toLowerCase() +
-            "_report.docx";
+            // ---------------------------------------------
+            // CREATE WORD DOCUMENT
+            // ---------------------------------------------
 
-        res.setHeader(
-            "Content-Type",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        );
+            const document =
+                new Document({
+                    sections: [
+                        {
+                            children,
+                        },
+                    ],
+                });
 
-        res.setHeader(
-            "Content-Disposition",
-            `attachment; filename="${filename}"`
-        );
+            // ---------------------------------------------
+            // CREATE BUFFER
+            // ---------------------------------------------
 
-        return res.send(
-            buffer
-        );
+            const buffer =
+                await Packer.toBuffer(
+                    document
+                );
+
+            const filename =
+                `${safeProjectName}_report.docx`;
+
+            // ---------------------------------------------
+            // RESPONSE HEADERS
+            // ---------------------------------------------
+
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            );
+
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${filename}"`
+            );
+
+            res.setHeader(
+                "Content-Length",
+                buffer.length
+            );
+
+            res.setHeader(
+                "Cache-Control",
+                "no-store"
+            );
+
+            return res.end(buffer);
+        }
+
     } catch (error) {
+
         console.error(
             "downloadReport error:",
             error
         );
 
+        // Don't send another response if the PDF
+        // stream has already started.
+        if (res.headersSent) {
+            return res.end();
+        }
+
         return res.status(500).json({
             success: false,
             message:
+                error.message ||
                 "Failed to download report",
         });
     }
