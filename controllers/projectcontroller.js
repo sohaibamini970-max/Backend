@@ -1,10 +1,15 @@
 const pool = require("../config/db");
 
+/*
+============================================================
+GET PROJECTS
+============================================================
+*/
+
 const getProjects = async (req, res) => {
     try {
-
         const result = await pool.query(`
-            SELECT
+            SELECT 
                 p.id,
                 p.name,
                 p.domain,
@@ -15,7 +20,6 @@ const getProjects = async (req, res) => {
                 p.start_date,
                 p.deadline,
                 p.progress,
-
                 p.created_at,
                 p.updated_at,
 
@@ -45,7 +49,6 @@ const getProjects = async (req, res) => {
         });
 
     } catch (error) {
-
         console.error("Get projects error:", error);
 
         return res.status(500).json({
@@ -60,12 +63,10 @@ const getProjects = async (req, res) => {
 ============================================================
 GET PROJECT MANAGERS
 ============================================================
-Used by assignment board.
 */
 
 const getProjectManagers = async (req, res) => {
     try {
-
         const result = await pool.query(`
             SELECT
                 id,
@@ -84,11 +85,7 @@ const getProjectManagers = async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "Get project managers error:",
-            error
-        );
+        console.error("Get project managers error:", error);
 
         return res.status(500).json({
             success: false,
@@ -107,7 +104,6 @@ ONLY EXECUTIVE MANAGER
 
 const createProject = async (req, res) => {
     try {
-
         const {
             name,
             domain,
@@ -118,14 +114,12 @@ const createProject = async (req, res) => {
             priority
         } = req.body;
 
-
         if (!name || !name.trim()) {
             return res.status(400).json({
                 success: false,
                 message: "Project name is required."
             });
         }
-
 
         const result = await pool.query(
             `
@@ -165,7 +159,6 @@ const createProject = async (req, res) => {
             ]
         );
 
-
         return res.status(201).json({
             success: true,
             message: "Project created successfully.",
@@ -173,11 +166,7 @@ const createProject = async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "Create project error:",
-            error
-        );
+        console.error("Create project error:", error);
 
         return res.status(500).json({
             success: false,
@@ -189,20 +178,298 @@ const createProject = async (req, res) => {
 
 /*
 ============================================================
+UPDATE PROJECT
+============================================================
+ONLY EXECUTIVE MANAGER
+
+Updates:
+- name
+- domain
+- about title
+- description
+- start date
+- deadline
+- priority
+*/
+
+const updateProject = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+
+        const {
+            name,
+            domain,
+            aboutTitle,
+            aboutDescription,
+            startDate,
+            deadline,
+            priority
+        } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Project name is required."
+            });
+        }
+
+        /*
+        --------------------------------------------------------
+        Validate dates on backend as well
+        --------------------------------------------------------
+        */
+
+        if (startDate && deadline && deadline < startDate) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Deadline must be greater than or equal to the start date."
+            });
+        }
+
+        const projectResult = await pool.query(
+            `
+            SELECT id
+            FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found."
+            });
+        }
+
+        const result = await pool.query(
+            `
+            UPDATE projects
+            SET
+                name = $1,
+                domain = $2,
+                about_title = $3,
+                about_description = $4,
+                start_date = $5,
+                deadline = $6,
+                priority = $7,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $8
+            RETURNING *
+            `,
+            [
+                name.trim(),
+                domain || null,
+                aboutTitle || null,
+                aboutDescription || null,
+                startDate || null,
+                deadline || null,
+                priority || "Medium",
+                projectId
+            ]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Project updated successfully.",
+            project: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Update project error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update project."
+        });
+    }
+};
+
+
+/*
+============================================================
+UPDATE PROJECT DEADLINE
+============================================================
+ONLY EXECUTIVE MANAGER
+*/
+
+const updateProjectDeadline = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const { deadline } = req.body;
+
+        const projectResult = await pool.query(
+            `
+            SELECT start_date
+            FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found."
+            });
+        }
+
+        const startDate = projectResult.rows[0].start_date;
+
+        if (deadline && startDate && deadline < startDate) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Deadline must be greater than or equal to the start date."
+            });
+        }
+
+        const result = await pool.query(
+            `
+            UPDATE projects
+            SET
+                deadline = $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+            RETURNING *
+            `,
+            [
+                deadline || null,
+                projectId
+            ]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Project deadline updated successfully.",
+            project: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Update deadline error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update project deadline."
+        });
+    }
+};
+
+
+/*
+============================================================
+DELETE PROJECT
+============================================================
+ONLY EXECUTIVE MANAGER
+
+Deletes:
+1. All tasks belonging to project
+2. Project itself
+
+Uses transaction for safety.
+*/
+
+const deleteProject = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { projectId } = req.params;
+
+        await client.query("BEGIN");
+
+        /*
+        --------------------------------------------------------
+        Check project exists
+        --------------------------------------------------------
+        */
+
+        const projectResult = await client.query(
+            `
+            SELECT id, name
+            FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        if (projectResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                success: false,
+                message: "Project not found."
+            });
+        }
+
+        const projectName = projectResult.rows[0].name;
+
+        /*
+        --------------------------------------------------------
+        Delete tasks first
+        --------------------------------------------------------
+        */
+
+        const deletedTasks = await client.query(
+            `
+            DELETE FROM tasks
+            WHERE project_id = $1
+            RETURNING id
+            `,
+            [projectId]
+        );
+
+        /*
+        --------------------------------------------------------
+        Delete project
+        --------------------------------------------------------
+        */
+
+        await client.query(
+            `
+            DELETE FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        await client.query("COMMIT");
+
+        return res.status(200).json({
+            success: true,
+            message: "Project and its tasks deleted successfully.",
+            projectId,
+            projectName,
+            deletedTasks: deletedTasks.rowCount
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+
+        console.error("Delete project error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete project."
+        });
+
+    } finally {
+        client.release();
+    }
+};
+
+
+/*
+============================================================
 ASSIGN PROJECT
 ============================================================
 ONLY PROJECT MANAGER
-
-The selected user MUST also be a Project Manager.
 */
 
 const assignProject = async (req, res) => {
     try {
-
         const { projectId } = req.params;
-
         const { managerId } = req.body;
-
 
         if (!managerId) {
             return res.status(400).json({
@@ -210,13 +477,6 @@ const assignProject = async (req, res) => {
                 message: "Project manager is required."
             });
         }
-
-
-        /*
-        --------------------------------------------------------
-        Verify selected user is a Project Manager
-        --------------------------------------------------------
-        */
 
         const managerResult = await pool.query(
             `
@@ -234,7 +494,6 @@ const assignProject = async (req, res) => {
             [managerId]
         );
 
-
         if (managerResult.rows.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -242,13 +501,6 @@ const assignProject = async (req, res) => {
                     "Selected user is not an active Project Manager."
             });
         }
-
-
-        /*
-        --------------------------------------------------------
-        Verify project exists
-        --------------------------------------------------------
-        */
 
         const projectResult = await pool.query(
             `
@@ -259,7 +511,6 @@ const assignProject = async (req, res) => {
             [projectId]
         );
 
-
         if (projectResult.rows.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -267,17 +518,9 @@ const assignProject = async (req, res) => {
             });
         }
 
-
-        /*
-        --------------------------------------------------------
-        Assign project
-        --------------------------------------------------------
-        */
-
         const result = await pool.query(
             `
             UPDATE projects
-
             SET
                 project_manager_id = $1,
                 status =
@@ -286,9 +529,7 @@ const assignProject = async (req, res) => {
                         THEN 'Backlog'
                         ELSE status
                     END
-
             WHERE id = $2
-
             RETURNING *
             `,
             [
@@ -296,7 +537,6 @@ const assignProject = async (req, res) => {
                 projectId
             ]
         );
-
 
         return res.status(200).json({
             success: true,
@@ -306,11 +546,7 @@ const assignProject = async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "Assign project error:",
-            error
-        );
+        console.error("Assign project error:", error);
 
         return res.status(500).json({
             success: false,
@@ -329,24 +565,19 @@ ONLY PROJECT MANAGER
 
 const unassignProject = async (req, res) => {
     try {
-
         const { projectId } = req.params;
 
         const result = await pool.query(
             `
             UPDATE projects
-
             SET
                 project_manager_id = NULL,
                 status = 'Unassigned'
-
             WHERE id = $1
-
             RETURNING *
             `,
             [projectId]
         );
-
 
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -355,7 +586,6 @@ const unassignProject = async (req, res) => {
             });
         }
 
-
         return res.status(200).json({
             success: true,
             message: "Project unassigned successfully.",
@@ -363,11 +593,7 @@ const unassignProject = async (req, res) => {
         });
 
     } catch (error) {
-
-        console.error(
-            "Unassign project error:",
-            error
-        );
+        console.error("Unassign project error:", error);
 
         return res.status(500).json({
             success: false,
@@ -381,8 +607,9 @@ module.exports = {
     getProjects,
     getProjectManagers,
     createProject,
+    updateProject,
+    updateProjectDeadline,
+    deleteProject,
     assignProject,
     unassignProject
 };
-
-
