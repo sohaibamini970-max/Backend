@@ -117,7 +117,7 @@ ONLY PROJECT MANAGER
 router.patch(
     "/:projectId/assign",
     authenticate,
-    requireRole("Project Manager"),
+    requireRole("Executive Manager"),
     assignProject
 );
 
