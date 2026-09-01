@@ -9,7 +9,7 @@ const {
 } = require("../controllers/usercontroller");
 
 const {authenticate} = require("../middleware/authMiddleware");
-const requireSystemAdministrator = require("../middleware/adminMiddleware");
+const {requireSystemAdministrator} = require("../middleware/adminMiddleware");
 
 /*
   Change authMiddleware above to the name/path
