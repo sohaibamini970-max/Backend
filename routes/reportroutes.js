@@ -1,27 +1,74 @@
 // routes/reportRoutes.js
+
 const express = require("express");
-const { 
-    reportUpload,  // ✅ From controller
+
+const {
+    reportUpload,
     getReportOverview,
     getProjectReport,
     createOrUpdateReport,
     downloadReport,
-    reportUpload,
     uploadProjectReportFile,
 } = require("../controllers/reportcontroller");
 
+const { authenticate } = require("../middleware/authMiddleware");
+
 const router = express.Router();
 
-// GET routes
-router.get("/", getReportOverview);
-router.get("/project/:projectId", getProjectReport);
-router.get("/project/:projectId/download/:format", downloadReport);
+// =========================================================
+// GET REPORT OVERVIEW
+// GET /api/reports
+// =========================================================
 
-// POST routes
-router.post("/project/:projectId", createOrUpdateReport);
+router.get(
+    "/",
+    authenticate,
+    getReportOverview
+);
+
+// =========================================================
+// GET SINGLE PROJECT REPORT
+// GET /api/reports/project/:projectId
+// =========================================================
+
+router.get(
+    "/project/:projectId",
+    authenticate,
+    getProjectReport
+);
+
+// =========================================================
+// DOWNLOAD PROJECT REPORT
+// GET /api/reports/project/:projectId/download/pdf
+// GET /api/reports/project/:projectId/download/word
+// =========================================================
+
+router.get(
+    "/project/:projectId/download/:format",
+    authenticate,
+    downloadReport
+);
+
+// =========================================================
+// CREATE / UPDATE PROJECT REPORT
+// POST /api/reports/project/:projectId
+// =========================================================
+
+router.post(
+    "/project/:projectId",
+    authenticate,
+    createOrUpdateReport
+);
+
+// =========================================================
+// UPLOAD PROJECT REPORT FILE
+// POST /api/reports/project/:projectId/upload
+// =========================================================
+
 router.post(
     "/project/:projectId/upload",
-    reportUpload.single("file"),  // ✅ Using the one from controller
+    authenticate,
+    reportUpload.single("file"),
     uploadProjectReportFile
 );
 
