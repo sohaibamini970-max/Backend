@@ -1,337 +1,247 @@
-const pool = require("../config/db");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
+const { Pool } = require("pg");
 
-/*
-|--------------------------------------------------------------------------
-| ALLOWED SYSTEM ROLES
-|--------------------------------------------------------------------------
-|
-| role = permission/access level
-| job_title = actual designation
-|
-*/
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false,
+});
+
+/* =========================================================
+   ALLOWED ROLES
+========================================================= */
 
 const ALLOWED_ROLES = [
-    "Member",
-    "Project Manager",
-    "Executive Manager",
-    "System Administrator",
+  "System Administrator",
+  "Executive Manager",
+  "Project Manager",
+  "Member",
 ];
 
-/*
-|--------------------------------------------------------------------------
-| GET ALL USERS
-|--------------------------------------------------------------------------
-|
-| GET /api/users
-|
-*/
+/* =========================================================
+   GET ALL USERS
+   GET /api/users
+========================================================= */
 
 const getUsers = async (req, res) => {
-    try {
-        const query = `
-            SELECT
-                id,
-                full_name,
-                email,
-                role,
-                job_title,
-                is_active,
-                last_login_at,
-                created_at
-            FROM users
-            ORDER BY created_at DESC;
-        `;
+  try {
+    const result = await pool.query(`
+      SELECT
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        updated_at,
+        job_title
+      FROM users
+      ORDER BY created_at DESC
+    `);
 
-        const result = await pool.query(query);
+    return res.status(200).json({
+      success: true,
+      users: result.rows,
+    });
+  } catch (error) {
+    console.error("Get users error:", error);
 
-        return res.status(200).json({
-            success: true,
-            count: result.rows.length,
-            data: result.rows,
-        });
-
-    } catch (error) {
-        console.error("Error fetching users:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Server error while fetching users.",
-        });
-    }
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch users.",
+    });
+  }
 };
 
-
-/*
-|--------------------------------------------------------------------------
-| CREATE USER
-|--------------------------------------------------------------------------
-|
-| POST /api/users
-|
-| Example request:
-|
-| {
-|     "full_name": "Peter Parker",
-|     "email": "peter@arg.com",
-|     "role": "Member",
-|     "job_title": "Frontend Developer"
-| }
-|
-*/
+/* =========================================================
+   CREATE USER
+   POST /api/users
+========================================================= */
 
 const createUser = async (req, res) => {
+  try {
+    const {
+      fullName,
+      email,
+      password,
+      role,
+      jobTitle,
+    } = req.body;
 
-    try {
+    /* -----------------------------------------------------
+       VALIDATION
+    ----------------------------------------------------- */
 
-        /*
-        |--------------------------------------------------------------------------
-        | READ REQUEST BODY
-        |--------------------------------------------------------------------------
-        */
-
-        const fullName =
-            req.body.full_name ||
-            req.body.fullName;
-
-        const email =
-            req.body.email;
-
-        const role =
-            "Member";
-
-        const jobTitle =
-            req.body.job_title ||
-            req.body.jobTitle;
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATE FULL NAME
-        |--------------------------------------------------------------------------
-        */
-
-        if (!fullName || !fullName.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: "Full name is required.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATE EMAIL
-        |--------------------------------------------------------------------------
-        */
-
-        if (!email || !email.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: "Email is required.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATE ROLE
-        |--------------------------------------------------------------------------
-        */
-
-        if (!role || !role.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: "Role is required.",
-            });
-        }
-
-        /*
-        | Make sure role is an actual system role.
-        |
-        | IMPORTANT:
-        | "Frontend Developer" should NOT be sent as role.
-        | It should be sent as job_title.
-        */
-
-        if (!ALLOWED_ROLES.includes(role.trim())) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    `Invalid role. Allowed roles are: ${ALLOWED_ROLES.join(", ")}.`,
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATE JOB TITLE
-        |--------------------------------------------------------------------------
-        */
-
-        if (!jobTitle || !jobTitle.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: "Job title is required.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | CHECK DUPLICATE EMAIL
-        |--------------------------------------------------------------------------
-        */
-
-        const existingUser = await pool.query(
-            `
-            SELECT id
-            FROM users
-            WHERE LOWER(email) = LOWER($1)
-            LIMIT 1
-            `,
-            [email.trim()]
-        );
-
-        if (existingUser.rowCount > 0) {
-            return res.status(409).json({
-                success: false,
-                message: "A user with this email already exists.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | TEMPORARY PASSWORD
-        |--------------------------------------------------------------------------
-        |
-        | The Teams form does not ask for a password.
-        |
-        | New users receive this temporary password:
-        |
-        | 12345678
-        |
-        */
-
-        const temporaryPassword = "12345678";
-
-        const passwordHash = await bcrypt.hash(
-            temporaryPassword,
-            10
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | INSERT USER
-        |--------------------------------------------------------------------------
-        */
-
-        const result = await pool.query(
-            `
-            INSERT INTO users (
-                full_name,
-                email,
-                password_hash,
-                role,
-                job_title,
-                is_active
-            )
-            VALUES ($1, $2, $3, $4, $5, TRUE)
-            RETURNING
-                id,
-                full_name,
-                email,
-                role,
-                job_title,
-                is_active,
-                last_login_at,
-                created_at
-            `,
-            [
-                fullName.trim(),
-                email.trim().toLowerCase(),
-                passwordHash,
-                role.trim(),
-                jobTitle.trim(),
-            ]
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | RESPONSE
-        |--------------------------------------------------------------------------
-        */
-
-        return res.status(201).json({
-            success: true,
-            message: "User created successfully.",
-            user: result.rows[0],
-            temporaryPassword,
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Error creating user:",
-            error
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | POSTGRESQL DUPLICATE CONSTRAINT
-        |--------------------------------------------------------------------------
-        */
-
-        if (error.code === "23505") {
-            return res.status(409).json({
-                success: false,
-                message: "A user with this email already exists.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | POSTGRESQL ENUM ERROR
-        |--------------------------------------------------------------------------
-        */
-
-        if (error.code === "22P02") {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Invalid role value. Please use a valid system role.",
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | SERVER ERROR
-        |--------------------------------------------------------------------------
-        */
-
-        return res.status(500).json({
-            success: false,
-            message: "Server error while creating user.",
-        });
+    if (!fullName || !email || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        message: "Full name, email, password and role are required.",
+      });
     }
+
+    if (!ALLOWED_ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user role.",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters.",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    /* -----------------------------------------------------
+       CHECK EXISTING EMAIL
+    ----------------------------------------------------- */
+
+    const existingUser = await pool.query(
+      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [normalizedEmail]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "A user with this email already exists.",
+      });
+    }
+
+    /* -----------------------------------------------------
+       HASH PASSWORD
+    ----------------------------------------------------- */
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    /* -----------------------------------------------------
+       INSERT USER
+    ----------------------------------------------------- */
+
+    const result = await pool.query(
+      `
+      INSERT INTO users (
+        email,
+        password_hash,
+        full_name,
+        role,
+        is_active,
+        job_title
+      )
+      VALUES ($1, $2, $3, $4, true, $5)
+      RETURNING
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        updated_at,
+        job_title
+      `,
+      [
+        normalizedEmail,
+        passwordHash,
+        fullName.trim(),
+        role,
+        jobTitle?.trim() || null,
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "User created successfully.",
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Create user error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create user.",
+    });
+  }
 };
 
+/* =========================================================
+   ACTIVATE / DEACTIVATE USER
+   PATCH /api/users/:id/status
+========================================================= */
 
-/*
-|--------------------------------------------------------------------------
-| EXPORTS
-|--------------------------------------------------------------------------
-*/
+const updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "isActive must be true or false.",
+      });
+    }
+
+    /* Prevent administrator from disabling himself */
+
+    if (req.user?.id === id && !isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot deactivate your own account.",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET
+        is_active = $1,
+        updated_at = NOW()
+      WHERE id = $2
+      RETURNING
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        updated_at,
+        job_title
+      `,
+      [isActive, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: isActive
+        ? "User activated successfully."
+        : "User deactivated successfully.",
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Update user status error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update user status.",
+    });
+  }
+};
 
 module.exports = {
-    getUsers,
-    createUser,
+  getUsers,
+  createUser,
+  updateUserStatus,
 };
-
-
