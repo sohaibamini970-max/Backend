@@ -6,6 +6,7 @@ const {
     getProjectReport,
     createOrUpdateReport,
     downloadReport,
+    reportUpload,
     uploadProjectReportFile,
 } = require("../controllers/reportcontroller");
 
