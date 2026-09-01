@@ -8,17 +8,14 @@ const {
   updateUserStatus,
 } = require("../controllers/usercontroller");
 
-const {authenticate} = require("../middleware/authMiddleware");
-const {requireSystemAdministrator} = require("../middleware/adminMiddleware");
+// IMPORTANT: authenticate is a named export
+const { authenticate } = require("../middleware/authMiddleware");
 
-/*
-  Change authMiddleware above to the name/path
-  of your existing JWT authentication middleware.
-*/
+// adminMiddleware exports the function directly
+const requireSystemAdministrator = require("../middleware/adminMiddleware");
 
 /* =========================================================
-   ALL USER MANAGEMENT ROUTES
-   SYSTEM ADMINISTRATOR ONLY
+   SYSTEM ADMINISTRATOR USER MANAGEMENT
 ========================================================= */
 
 router.get(
