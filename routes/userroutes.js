@@ -8,7 +8,7 @@ const {
   updateUserStatus,
 } = require("../controllers/usercontroller");
 
-const authenticate = require("../middleware/authMiddleware");
+const {authenticate} = require("../middleware/authMiddleware");
 const requireSystemAdministrator = require("../middleware/adminMiddleware");
 
 /*
