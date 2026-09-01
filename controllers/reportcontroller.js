@@ -1100,16 +1100,14 @@ const downloadReport = async (req, res) => {
              */
 
             const regularFont = path.join(
-                process.cwd(),
-                "fonts",
-                "DejaVuSans.ttf"
-            );
+    __dirname,
+    "../fonts/DejaVuSans.ttf"
+);
 
-            const boldFont = path.join(
-                process.cwd(),
-                "fonts",
-                "DejaVuSans-Bold.ttf"
-            );
+const boldFont = path.join(
+    __dirname,
+    "../fonts/DejaVuSans-Bold.ttf"
+);
 
             // ---------------------------------------------
             // CHECK FONT FILES
