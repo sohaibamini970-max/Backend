@@ -531,20 +531,18 @@ const assignTask = async (req, res) => {
       });
     }
 
-    const userRole = userRoleResult.rows[0].role;
-    const isProjectManager = task.project_manager_id === userId;
-    const isProjectCreator = task.created_by === userId;
-    const isAdmin =
-      userRole === "System Administrator" ||
-      userRole === "Executive Manager";
+   const userRole = userRoleResult.rows[0].role;
+const isProjectCreator = task.created_by === userId;
+const isAdmin = userRole === "System Administrator" || userRole === "Executive Manager";
+const isPM = userRole === "Project Manager";
 
-    if (!isProjectManager && !isProjectCreator && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: "Only the Project Manager or Project Creator can assign tasks.",
-      });
-    }
-
+if (!isAdmin && !isPM && !isProjectCreator) {
+  return res.status(403).json({
+    success: false,
+    message: "Only System Administrator, Project Manager, or the Project Creator can assign tasks.",
+  });
+}
+// ... allow task creation/assignment
     // Verify assignee exists and is active
     const assigneeResult = await pool.query(
       `
