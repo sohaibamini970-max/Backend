@@ -841,134 +841,202 @@ const createOrUpdateReport =
 // ONLY PROJECT MANAGER
 // =========================================================
 
-const uploadProjectReportFile =
-    async (req, res) => {
-        try {
-            const { projectId } =
-                req.params;
+const uploadProjectReportFile = async (req, res) => {
+    let uploadedFilePath = null;
 
-            if (!req.file) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Please select a file",
-                });
-            }
+    try {
+        const { projectId } = req.params;
 
-            const user =
-                await getCurrentUser(
-                    req.user.id
-                );
+        // =================================================
+        // CHECK FILE
+        // =================================================
 
-            if (!user) {
-                return res.status(401).json({
-                    success: false,
-                    message:
-                        "User not found",
-                });
-            }
-
-            if (!user.is_active) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Your account is inactive",
-                });
-            }
-
-            if (
-                user.role !==
-                "Project Manager"
-            ) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Only Project Managers can upload project report files",
-                });
-            }
-
-            // ---------------------------------------------
-            // Verify assigned project
-            // ---------------------------------------------
-
-            const projectResult =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        name,
-                        project_manager_id
-                    FROM projects
-                    WHERE id = $1
-                    `,
-                    [projectId]
-                );
-
-            if (
-                projectResult.rows
-                    .length === 0
-            ) {
-                return res.status(404).json({
-                    success: false,
-                    message:
-                        "Project not found",
-                });
-            }
-
-            const project =
-                projectResult.rows[0];
-
-            if (
-                project.project_manager_id !==
-                user.id
-            ) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "You can only upload files for projects assigned to you",
-                });
-            }
-
-            const fileUrl =
-                `/uploads/reports/${req.file.filename}`;
-
-            return res.status(200).json({
-                success: true,
-
-                message:
-                    "File uploaded successfully",
-
-                file: {
-                    originalName:
-                        req.file
-                            .originalname,
-
-                    fileName:
-                        req.file.filename,
-
-                    mimeType:
-                        req.file.mimetype,
-
-                    size:
-                        req.file.size,
-
-                    url: fileUrl,
-                },
-            });
-        } catch (error) {
-            console.error(
-                "uploadProjectReportFile error:",
-                error
-            );
-
-            return res.status(500).json({
+        if (!req.file) {
+            return res.status(400).json({
                 success: false,
-                message:
-                    error.message ||
-                    "Failed to upload project file",
+                message: "Please select a file",
             });
         }
-    };
+
+        uploadedFilePath = req.file.path;
+
+        // =================================================
+        // GET CURRENT USER
+        // =================================================
+
+        const user = await getCurrentUser(req.user.id);
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        if (!user.is_active) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is inactive",
+            });
+        }
+
+        // =================================================
+        // ONLY PROJECT MANAGER
+        // =================================================
+
+        if (user.role !== "Project Manager") {
+            return res.status(403).json({
+                success: false,
+                message:
+                    "Only Project Managers can upload project report files",
+            });
+        }
+
+        // =================================================
+        // VERIFY PROJECT
+        // =================================================
+
+        const projectResult = await pool.query(
+            `
+            SELECT
+                id,
+                name,
+                project_manager_id
+            FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found",
+            });
+        }
+
+        const project = projectResult.rows[0];
+
+        // =================================================
+        // VERIFY PROJECT MANAGER
+        // =================================================
+
+        if (project.project_manager_id !== user.id) {
+            return res.status(403).json({
+                success: false,
+                message:
+                    "You can only upload files for projects assigned to you",
+            });
+        }
+
+        // =================================================
+        // EXTRACT TEXT FROM FILE
+        // =================================================
+
+        console.log("========================================");
+        console.log("REPORT FILE UPLOAD");
+        console.log("Original file:", req.file.originalname);
+        console.log("MIME type:", req.file.mimetype);
+        console.log("File path:", req.file.path);
+        console.log("File size:", req.file.size);
+        console.log("========================================");
+
+        let extractedContent = "";
+
+        try {
+            extractedContent = await extractReportContent(req.file);
+
+            console.log(
+                "Extracted content length:",
+                extractedContent.length
+            );
+
+            if (extractedContent) {
+                console.log(
+                    "Extracted content preview:",
+                    extractedContent.substring(0, 300)
+                );
+            }
+        } catch (extractionError) {
+            console.error(
+                "Report text extraction failed:",
+                extractionError
+            );
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    extractionError.message ||
+                    "Could not extract readable text from this file.",
+            });
+        }
+
+        // =================================================
+        // MAKE SURE TEXT WAS FOUND
+        // =================================================
+
+        if (!extractedContent || !extractedContent.trim()) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "The file was uploaded, but no readable text was found. Make sure the PDF or Word document contains selectable text.",
+            });
+        }
+
+        // =================================================
+        // FILE URL
+        // =================================================
+
+        const fileUrl =
+            `/uploads/reports/${req.file.filename}`;
+
+        // =================================================
+        // RETURN FILE + EXTRACTED CONTENT
+        // =================================================
+
+        return res.status(200).json({
+            success: true,
+
+            message:
+                "File uploaded and text extracted successfully",
+
+            file: {
+                originalName:
+                    req.file.originalname,
+
+                fileName:
+                    req.file.filename,
+
+                mimeType:
+                    req.file.mimetype,
+
+                size:
+                    req.file.size,
+
+                url:
+                    fileUrl,
+            },
+
+            // IMPORTANT:
+            // Frontend expects this property.
+            content:
+                extractedContent,
+        });
+
+    } catch (error) {
+        console.error(
+            "uploadProjectReportFile error:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                error.message ||
+                "Failed to upload project file",
+        });
+    }
+};
 
 // =========================================================
 // DOWNLOAD REPORT
