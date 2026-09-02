@@ -10,7 +10,7 @@ const {
   getTaskChallenges,
   createTaskChallenge,
   deleteTaskChallenge,
-} = require("../controllers/challengeController");
+} = require("../controllers/challengecontroller");
 
 /*
  * Get all challenges for a task.
