@@ -3,6 +3,8 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 const PDFDocument = require("pdfkit");
+const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
 
 const {
     Document,
@@ -84,6 +86,75 @@ const reportUpload = multer({
         cb(null, true);
     },
 });
+
+// =========================================================
+// REPORT DOCUMENT TEXT EXTRACTION
+// =========================================================
+
+const extractReportContent = async (file) => {
+    const extension = path
+        .extname(file.originalname)
+        .toLowerCase();
+
+    // -----------------------------------------------------
+    // PDF
+    // -----------------------------------------------------
+
+    if (
+        extension === ".pdf" ||
+        file.mimetype === "application/pdf"
+    ) {
+        const buffer = fs.readFileSync(file.path);
+
+        const parsed = await pdfParse(buffer);
+
+        return String(parsed.text || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    }
+
+    // -----------------------------------------------------
+    // DOCX
+    // -----------------------------------------------------
+
+    if (
+        extension === ".docx" ||
+        file.mimetype ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ) {
+        const result =
+            await mammoth.extractRawText({
+                path: file.path,
+            });
+
+        return String(result.value || "")
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    }
+
+    // -----------------------------------------------------
+    // OLD .DOC
+    // -----------------------------------------------------
+
+    if (
+        extension === ".doc" ||
+        file.mimetype === "application/msword"
+    ) {
+        throw new Error(
+            "Old .doc files are not supported. Please save the document as .docx and upload it again."
+        );
+    }
+
+    throw new Error(
+        "Only PDF and DOCX files can be used for report content."
+    );
+};
 
 // =========================================================
 // GET LOGGED-IN USER
