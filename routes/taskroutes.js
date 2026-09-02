@@ -8,6 +8,8 @@ const {
 
 } = require("../middleware/authMiddleware");
 
+const requireSystemAdministrator = require("../middleware/adminMiddleware");
+
 const {
 
   getProjectTasks,
@@ -108,7 +110,7 @@ router.delete(
   "/:taskId",
 
   authenticate,
-
+  requireSystemAdministrator,
   deleteTask
 
 );
