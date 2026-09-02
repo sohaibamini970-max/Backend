@@ -12,33 +12,95 @@ const MANAGEMENT_ROLES = [
 |--------------------------------------------------------------------------
 */
 
+/*
+|--------------------------------------------------------------------------
+| GET TEAMS
+|--------------------------------------------------------------------------
+|
+| Management roles:
+|   - See all teams
+|
+| Member:
+|   - See only the team they belong to
+|
+|--------------------------------------------------------------------------
+*/
+
 async function getTeams(req, res) {
     try {
-        const result = await pool.query(`
-            SELECT
-                t.id,
-                t.name,
-                t.description,
-                t.created_by,
-                t.created_at,
-                COUNT(tm.user_id)::int AS member_count
-            FROM teams t
-            LEFT JOIN team_members tm
-                ON tm.team_id = t.id
-            GROUP BY t.id
-            ORDER BY t.created_at DESC
-        `);
+        const currentUserId = req.user.id;
+        const currentUserRole = req.user.role;
 
-        res.json(result.rows);
+        // --------------------------------------------------
+        // MANAGEMENT
+        // Keep existing behavior:
+        // Project Manager
+        // Executive Manager
+        // System Administrator
+        // can see ALL teams
+        // --------------------------------------------------
+
+        if (MANAGEMENT_ROLES.includes(currentUserRole)) {
+            const result = await pool.query(`
+                SELECT 
+                    t.id, 
+                    t.name, 
+                    t.description, 
+                    t.created_by, 
+                    t.created_at, 
+                    COUNT(tm.user_id)::int AS member_count
+                FROM teams t
+                LEFT JOIN team_members tm 
+                    ON tm.team_id = t.id
+                GROUP BY t.id
+                ORDER BY t.created_at DESC
+            `);
+
+            return res.json(result.rows);
+        }
+
+        // --------------------------------------------------
+        // MEMBER
+        // Show ONLY the team this user belongs to
+        // --------------------------------------------------
+
+        if (currentUserRole === "Member") {
+            const result = await pool.query(`
+                SELECT 
+                    t.id, 
+                    t.name, 
+                    t.description, 
+                    t.created_by, 
+                    t.created_at, 
+                    COUNT(tm_all.user_id)::int AS member_count
+                FROM teams t
+                INNER JOIN team_members tm_user
+                    ON tm_user.team_id = t.id
+                LEFT JOIN team_members tm_all
+                    ON tm_all.team_id = t.id
+                WHERE tm_user.user_id = $1
+                GROUP BY t.id
+                ORDER BY t.created_at DESC
+            `, [currentUserId]);
+
+            return res.json(result.rows);
+        }
+
+        // --------------------------------------------------
+        // OTHER ROLES
+        // Preserve safe existing behavior
+        // --------------------------------------------------
+
+        return res.json([]);
+
     } catch (error) {
-        console.error(error);
+        console.error("GET TEAMS ERROR:", error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to load teams",
         });
     }
 }
-
 /*
 |--------------------------------------------------------------------------
 | GET MEMBERS NOT IN TEAM
