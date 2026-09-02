@@ -6,12 +6,11 @@ const requireSystemAdministrator = (req, res, next) => {
     });
   }
 
-  if (req.user.role !== "System Administrator") {
-    return res.status(403).json({
-      success: false,
-      message: "Only System Administrators can manage users.",
-    });
-  }
+ const allowedRoles = ["System Administrator", "Project Manager"];
+
+if (!allowedRoles.includes(req.user.role)) {
+  return res.status(403).json({ error: 'Only administrator or project manager can manage users' });
+}
 
   next();
 };
