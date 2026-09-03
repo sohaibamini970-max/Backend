@@ -602,6 +602,151 @@ const unassignProject = async (req, res) => {
     }
 };
 
+/*
+============================================================
+UPDATE PROJECT STATUS
+============================================================
+ONLY PROJECT MANAGER
+============================================================
+
+Allowed statuses:
+
+- Unassigned
+- Backlog
+- In Progress
+- Paused
+- Done
+*/
+
+const updateProjectStatus = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const { status } = req.body;
+
+        /*
+        --------------------------------------------------------
+        Validate status
+        --------------------------------------------------------
+        */
+
+        const allowedStatuses = [
+            "Unassigned",
+            "Backlog",
+            "In Progress",
+            "Paused",
+            "Done"
+        ];
+
+        if (!status || !allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid project status. Allowed statuses are: Unassigned, Backlog, In Progress, Paused, Done."
+            });
+        }
+
+        /*
+        --------------------------------------------------------
+        Check project exists
+        --------------------------------------------------------
+        */
+
+        const projectResult = await pool.query(
+            `
+            SELECT
+                id,
+                name,
+                status,
+                project_manager_id
+            FROM projects
+            WHERE id = $1
+            `,
+            [projectId]
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found."
+            });
+        }
+
+        const project = projectResult.rows[0];
+
+        /*
+        --------------------------------------------------------
+        Prevent assigned project from becoming Unassigned
+        --------------------------------------------------------
+        
+        If a project still has a Project Manager, its status
+        should not be changed to Unassigned.
+        */
+
+        if (
+            status === "Unassigned" &&
+            project.project_manager_id
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "A project with an assigned Project Manager cannot have Unassigned status. Unassign the project first."
+            });
+        }
+
+        /*
+        --------------------------------------------------------
+        Prevent assigned project from remaining Unassigned
+        --------------------------------------------------------
+        */
+
+        if (
+            status !== "Unassigned" &&
+            !project.project_manager_id
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "A Project Manager must be assigned before changing the project status."
+            });
+        }
+
+        /*
+        --------------------------------------------------------
+        Update status
+        --------------------------------------------------------
+        */
+
+        const result = await pool.query(
+            `
+            UPDATE projects
+            SET
+                status = $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+            RETURNING *
+            `,
+            [
+                status,
+                projectId
+            ]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Project status updated successfully.",
+            project: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Update project status error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update project status."
+        });
+    }
+};
+
 
 module.exports = {
     getProjects,
@@ -611,5 +756,6 @@ module.exports = {
     updateProjectDeadline,
     deleteProject,
     assignProject,
-    unassignProject
+    unassignProject,
+    updateProjectStatus
 };
