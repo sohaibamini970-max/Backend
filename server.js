@@ -10,6 +10,7 @@ const tasksRoutes = require("./routes/taskroutes");
 const teamRoutes = require("./routes/teamroutes");
 const reportRoutes = require("./routes/reportroutes");
 const challengeRoutes = require("./routes/challengeroutes");
+const taskAttachmentRoutes = require("./routes/taskattachmentroutes");
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use(
   "/api/challenges",
   challengeRoutes
 );
+app.use("/api", taskAttachmentRoutes);
 // Export app for Vercel serverless environment
 module.exports = app;
 
