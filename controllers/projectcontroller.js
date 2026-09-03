@@ -5,7 +5,7 @@ const pool = require("../config/db");
 GET PROJECTS
 ============================================================
 */
-
+ 
 const getProjects = async (req, res) => {
     try {
         const result = await pool.query(`
