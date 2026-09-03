@@ -136,5 +136,11 @@ router.patch(
     unassignProject
 );
 
+router.patch(
+    "/:projectId/status",
+    authenticate,
+    requireRole("Project Manager"),
+    updateProjectStatus
+);
 
 module.exports = router;
