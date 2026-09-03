@@ -15,7 +15,8 @@ const {
     updateProjectDeadline,
     deleteProject,
     assignProject,
-    unassignProject
+    unassignProject,
+    updateProjectStatus
 } = require("../controllers/projectcontroller");
 
 
