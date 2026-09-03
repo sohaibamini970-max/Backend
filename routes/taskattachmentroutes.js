@@ -1,6 +1,6 @@
 const express = require("express");
 const multer = require("multer");
-const { authentication } = require("../middleware/authMiddleware"); // Your auth middleware
+const { authenticate } = require("../middleware/authMiddleware"); // Your auth middleware
 const {
   uploadTaskAttachment,
   getTaskAttachments,
@@ -54,21 +54,21 @@ const upload = multer({
 // POST /api/tasks/:taskId/attachments - Upload file
 router.post(
   "/tasks/:taskId/attachments",
-  authentication,
+  authenticate,
   upload.single("file"),
   uploadTaskAttachment
 );
 
 // GET /api/tasks/:taskId/attachments - Get all attachments for a task
-router.get("/tasks/:taskId/attachments", authentication, getTaskAttachments);
+router.get("/tasks/:taskId/attachments", authenticate, getTaskAttachments);
 
 // GET /api/attachments/:attachmentId/download - Download file
-router.get("/attachments/:attachmentId/download", authentication, downloadTaskAttachment);
+router.get("/attachments/:attachmentId/download", authenticate, downloadTaskAttachment);
 
 // GET /api/attachments/:attachmentId/preview - Preview file (inline)
-router.get("/attachments/:attachmentId/preview", authentication, previewTaskAttachment);
+router.get("/attachments/:attachmentId/preview", authenticate, previewTaskAttachment);
 
 // DELETE /api/attachments/:attachmentId - Delete file
-router.delete("/attachments/:attachmentId", authentication, deleteTaskAttachment);
+router.delete("/attachments/:attachmentId", authenticate, deleteTaskAttachment);
 
 module.exports = router;
