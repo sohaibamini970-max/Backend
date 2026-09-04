@@ -11,6 +11,7 @@ const teamRoutes = require("./routes/teamroutes");
 const reportRoutes = require("./routes/reportroutes");
 const challengeRoutes = require("./routes/challengeroutes");
 const taskAttachmentRoutes = require("./routes/taskattachmentroutes");
+const dashboardRoutes = require("./routes/dashboardroutes");
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.get("/", (req, res) => {
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/tasks", tasksRoutes);
 app.use("/api/teams", teamRoutes);
