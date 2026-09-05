@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 // Get the model
 const getModel = () => {
     return genAI.getGenerativeModel({
-        model: "gemini-1.5-pro", // or "gemini-1.5-flash" for faster responses
+        model: "gemini-3.6-pro", // or "gemini-1.5-flash" for faster responses
         generationConfig: {
             temperature: 0.3,
             topK: 32,
