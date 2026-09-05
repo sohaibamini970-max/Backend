@@ -1,9 +1,9 @@
 // controllers/aiAgentController.js
 const { getChatModel } = require('../config/gemini');
-const projectController = require('./projectController');
-const taskController = require('./taskController');
-const userController = require('./userController');
-const submissionController = require('./taskSubmissionController');
+const projectController = require('./projectcontroller');
+const taskController = require('./taskcontroller');
+const userController = require('./usercontroller');
+const submissionController = require('./tasksubmissioncontroller');
 
 // Helper to get current user from request
 const getCurrentUser = (req) => {
