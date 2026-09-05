@@ -13,6 +13,7 @@ const challengeRoutes = require("./routes/challengeroutes");
 const taskAttachmentRoutes = require("./routes/taskattachmentroutes");
 const dashboardRoutes = require("./routes/dashboardroutes");
 const taskSubmissionRoutes = require('./routes/tasksubmissionroutes');
+const aiAgentRoutes = require('./routes/aiAgentRoutes');
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.get("/", (req, res) => {
 });
 
 // API Routes
+app.use('/api/ai', aiAgentRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
