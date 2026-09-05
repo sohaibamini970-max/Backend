@@ -11,6 +11,37 @@ const getCurrentUser = (req) => {
 };
 
 // ============================================================
+// GENERATE PROJECT DESCRIPTION - EXPORT THIS
+// ============================================================
+const generateProjectDescription = async (projectName, domain) => {
+    try {
+        const { getModel } = require('../config/gemini');
+        const model = getModel();
+
+        const prompt = `
+        Generate a professional project description for a project called "${projectName}" 
+        ${domain ? `in the domain of "${domain}"` : ''}.
+        
+        The description should be 2-3 sentences explaining:
+        1. What the project aims to achieve
+        2. Key objectives
+        3. Expected outcomes
+        
+        Be professional, concise, and specific. Do not include any markdown or formatting.
+        `;
+
+        const result = await model.generateContent(prompt);
+        return result.response.text().trim();
+    } catch (error) {
+        console.error('Error generating project description:', error);
+        return `A project focused on ${projectName} to deliver value and achieve organizational goals.`;
+    }
+};
+
+// ✅ EXPORT THIS FUNCTION
+exports.generateProjectDescription = generateProjectDescription;
+
+// ============================================================
 // FUNCTION DEFINITIONS FOR THE AI AGENT
 // ============================================================
 
@@ -64,8 +95,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.createProject(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.createProject(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in createProject function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to create project'
+            };
+        }
     },
 
     updateProject: async (params, user) => {
@@ -107,8 +146,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.updateProject(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.updateProject(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in updateProject function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to update project'
+            };
+        }
     },
 
     deleteProject: async (params, user) => {
@@ -141,8 +188,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.deleteProject(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.deleteProject(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in deleteProject function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to delete project'
+            };
+        }
     },
 
     assignProject: async (params, user) => {
@@ -176,8 +231,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.assignProject(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.assignProject(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in assignProject function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to assign project'
+            };
+        }
     },
 
     unassignProject: async (params, user) => {
@@ -210,8 +273,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.unassignProject(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.unassignProject(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in unassignProject function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to unassign project'
+            };
+        }
     },
 
     updateProjectStatus: async (params, user) => {
@@ -246,8 +317,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.updateProjectStatus(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.updateProjectStatus(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in updateProjectStatus function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to update project status'
+            };
+        }
     },
 
     // Task functions
@@ -291,9 +370,16 @@ const functions = {
             })
         };
 
-        // We need to adapt the task creation
-        const result = await taskController.createTask(req, res);
-        return result.data || result;
+        try {
+            const result = await taskController.createTask(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in createTask function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to create task'
+            };
+        }
     },
 
     updateTaskStatus: async (params, user) => {
@@ -327,8 +413,16 @@ const functions = {
             })
         };
 
-        const result = await taskController.updateTaskStatus(req, res);
-        return result.data || result;
+        try {
+            const result = await taskController.updateTaskStatus(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in updateTaskStatus function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to update task status'
+            };
+        }
     },
 
     deleteTask: async (params, user) => {
@@ -361,8 +455,16 @@ const functions = {
             })
         };
 
-        const result = await taskController.deleteTask(req, res);
-        return result.data || result;
+        try {
+            const result = await taskController.deleteTask(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in deleteTask function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to delete task'
+            };
+        }
     },
 
     submitWork: async (params, user) => {
@@ -397,8 +499,16 @@ const functions = {
             })
         };
 
-        const result = await submissionController.addSubmission(req, res);
-        return result.data || result;
+        try {
+            const result = await submissionController.addSubmission(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in submitWork function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to submit work'
+            };
+        }
     },
 
     // Get functions
@@ -411,8 +521,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.getProjects(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.getProjects(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in getProjects function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to get projects'
+            };
+        }
     },
 
     getProjectManagers: async (params, user) => {
@@ -424,8 +542,16 @@ const functions = {
             })
         };
 
-        const result = await projectController.getProjectManagers(req, res);
-        return result.data || result;
+        try {
+            const result = await projectController.getProjectManagers(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in getProjectManagers function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to get project managers'
+            };
+        }
     },
 
     getUsers: async (params, user) => {
@@ -437,8 +563,16 @@ const functions = {
             })
         };
 
-        const result = await userController.getUsers(req, res);
-        return result.data || result;
+        try {
+            const result = await userController.getUsers(req, res);
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in getUsers function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to get users'
+            };
+        }
     },
 
     getTasks: async (params, user) => {
@@ -465,139 +599,21 @@ const functions = {
             })
         };
 
-        let result;
-        if (projectId) {
-            result = await taskController.getTasksByProject(req, res);
-        } else {
-            result = await taskController.getMyTasks(req, res);
-        }
-        return result.data || result;
-    }
-};
-
-// ============================================================
-// GENERATE PROJECT DESCRIPTION
-// ============================================================
-
-const generateProjectDescription = async (projectName, domain) => {
-    try {
-        const { getModel } = require('../config/gemini');
-        const model = getModel();
-
-        const prompt = `
-        Generate a professional project description for a project called "${projectName}" 
-        ${domain ? `in the domain of "${domain}"` : ''}.
-        
-        The description should be 2-3 sentences explaining:
-        1. What the project aims to achieve
-        2. Key objectives
-        3. Expected outcomes
-        
-        Be professional, concise, and specific. Do not include any markdown or formatting.
-        `;
-
-        const result = await model.generateContent(prompt);
-        return result.response.text().trim();
-    } catch (error) {
-        console.error('Error generating project description:', error);
-        return `A project focused on ${projectName} to deliver value and achieve organizational goals.`;
-    }
-};
-
-// ============================================================
-// MAIN AI AGENT HANDLER
-// ============================================================
-
-exports.handleAIAgent = async (req, res) => {
-    try {
-        const { message, conversationHistory = [] } = req.body;
-        const user = getCurrentUser(req);
-
-        if (!message) {
-            return res.status(400).json({
-                success: false,
-                error: 'Message is required'
-            });
-        }
-
-        if (!process.env.GOOGLE_AI_API_KEY) {
-            return res.status(500).json({
-                success: false,
-                error: 'Google AI API key is not configured'
-            });
-        }
-
-        // Get the chat model
-        const model = getChatModel();
-        
-        // Start chat with history
-        const chat = model.startChat({
-            history: conversationHistory.map(msg => ({
-                role: msg.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: msg.content }]
-            }))
-        });
-
-        // Send the user message
-        const result = await chat.sendMessage(message);
-        const aiResponse = result.response.text();
-
-        // Parse the response for function calls
-        const parsed = parseAIResponse(aiResponse);
-
-        if (parsed.function_call) {
-            // Execute the requested function
-            const functionName = parsed.function_call.name;
-            const params = parsed.function_call.arguments;
-
-            if (functions[functionName]) {
-                try {
-                    const executionResult = await functions[functionName](params, user);
-                    
-                    // Generate final response based on execution result
-                    const finalResponse = await generateFinalResponse(
-                        functionName,
-                        executionResult,
-                        user
-                    );
-
-                    return res.status(200).json({
-                        success: true,
-                        message: finalResponse,
-                        data: executionResult,
-                        function_called: functionName,
-                        requires_action: false
-                    });
-                } catch (error) {
-                    return res.status(500).json({
-                        success: false,
-                        error: `Failed to execute function ${functionName}: ${error.message}`
-                    });
-                }
+        try {
+            let result;
+            if (projectId) {
+                result = await taskController.getTasksByProject(req, res);
             } else {
-                return res.status(400).json({
-                    success: false,
-                    error: `Function "${functionName}" not found`,
-                    available_functions: Object.keys(functions)
-                });
+                result = await taskController.getMyTasks(req, res);
             }
+            return result.data || result;
+        } catch (error) {
+            console.error('Error in getTasks function:', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to get tasks'
+            };
         }
-
-        // If no function call, return the AI response
-        return res.status(200).json({
-            success: true,
-            message: aiResponse,
-            data: null,
-            function_called: null,
-            requires_action: false
-        });
-
-    } catch (error) {
-        console.error('AI Agent error:', error);
-        return res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to process AI request'
-        });
     }
 };
 
@@ -696,6 +712,119 @@ const generateFinalResponse = async (functionName, result, user) => {
 };
 
 // ============================================================
+// MAIN AI AGENT HANDLER
+// ============================================================
+
+exports.handleAIAgent = async (req, res) => {
+    try {
+        const { message, conversationHistory = [] } = req.body;
+        const user = getCurrentUser(req);
+
+        console.log('=== AI Agent Request ===');
+        console.log('User:', user?.id, user?.role);
+        console.log('Message:', message);
+
+        if (!message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Message is required'
+            });
+        }
+
+        // ✅ Check for both possible API key names
+        const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY;
+        console.log('API Key configured:', !!apiKey);
+
+        if (!apiKey) {
+            return res.status(500).json({
+                success: false,
+                error: 'Google AI API key is not configured. Please add GOOGLE_API_KEY to your environment variables.'
+            });
+        }
+
+        // Get the chat model
+        const model = getChatModel();
+        
+        // Start chat with history
+        const chat = model.startChat({
+            history: conversationHistory.map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+            }))
+        });
+
+        // Send the user message
+        console.log('Sending to Gemini...');
+        const result = await chat.sendMessage(message);
+        const aiResponse = result.response.text();
+        console.log('Gemini response received');
+
+        // Parse the response for function calls
+        const parsed = parseAIResponse(aiResponse);
+
+        if (parsed.function_call) {
+            // Execute the requested function
+            const functionName = parsed.function_call.name;
+            const params = parsed.function_call.arguments;
+            console.log(`Executing function: ${functionName}`, params);
+
+            if (functions[functionName]) {
+                try {
+                    const executionResult = await functions[functionName](params, user);
+                    console.log('Function execution completed');
+                    
+                    // Generate final response based on execution result
+                    const finalResponse = await generateFinalResponse(
+                        functionName,
+                        executionResult,
+                        user
+                    );
+
+                    return res.status(200).json({
+                        success: true,
+                        message: finalResponse,
+                        data: executionResult,
+                        function_called: functionName,
+                        requires_action: false
+                    });
+                } catch (error) {
+                    console.error(`Error executing function ${functionName}:`, error);
+                    return res.status(500).json({
+                        success: false,
+                        error: `Failed to execute function ${functionName}: ${error.message}`
+                    });
+                }
+            } else {
+                console.error(`Function "${functionName}" not found`);
+                return res.status(400).json({
+                    success: false,
+                    error: `Function "${functionName}" not found`,
+                    available_functions: Object.keys(functions)
+                });
+            }
+        }
+
+        // If no function call, return the AI response
+        return res.status(200).json({
+            success: true,
+            message: aiResponse,
+            data: null,
+            function_called: null,
+            requires_action: false
+        });
+
+    } catch (error) {
+        console.error('AI Agent error:', error);
+        console.error('Stack:', error.stack);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Failed to process AI request',
+            ...(process.env.NODE_ENV !== 'production' && { stack: error.stack })
+        });
+    }
+};
+
+// ============================================================
 // VALIDATE PROJECT CREATION PARAMETERS
 // ============================================================
 
@@ -709,11 +838,6 @@ exports.validateProjectParams = (params) => {
             missing: missing,
             message: `Missing required fields: ${missing.join(', ')}`
         };
-    }
-
-    // Generate description if missing
-    if (!params.aboutDescription && params.name) {
-        // Will be handled by the function
     }
 
     return { valid: true };
