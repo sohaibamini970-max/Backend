@@ -2,18 +2,21 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Get API key from environment
-const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY;
+const apiKey =
+    process.env.GOOGLE_AI_API_KEY;
 
 if (!apiKey) {
     console.error('❌ GOOGLE_API_KEY is not set');
-    console.error('Get your API key from: https://aistudio.google.com/app/apikey');
+    console.error(
+        'Get your API key from: https://aistudio.google.com/app/apikey'
+    );
 }
 
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// ✅ USE gemini-1.0-pro - Most stable and widely available
-const MODEL_NAME = "gemini-1.0-pro";
+// Current Gemini model
+const MODEL_NAME = "gemini-3.5-flash";
 
 // Get model for content generation
 const getModel = () => {
@@ -33,13 +36,11 @@ const getModel = () => {
     }
 };
 
-// Get chat model - Without system instruction (gemini-1.0-pro doesn't support it)
+// Get chat model
 const getChatModel = () => {
     try {
-        // gemini-1.0-pro doesn't support systemInstruction
-        // We'll handle instructions in the prompt
         return genAI.getGenerativeModel({
-            model: "gemini-1.0-pro",
+            model: MODEL_NAME,
             generationConfig: {
                 temperature: 0.3,
                 topK: 32,
@@ -53,20 +54,29 @@ const getChatModel = () => {
     }
 };
 
-// List available models (for debugging)
+// List available models
 const listAvailableModels = async () => {
     try {
         const result = await genAI.listModels();
-        console.log('✅ Available models:', result.models.map(m => m.name).join(', '));
+
+        console.log(
+            '✅ Available models:',
+            result.models.map(m => m.name).join(', ')
+        );
+
         return result;
     } catch (error) {
-        console.error('Error listing models:', error.message);
+        console.error(
+            '❌ Error listing models:',
+            error.message
+        );
+
         return null;
     }
 };
 
-module.exports = { 
-    getModel, 
+module.exports = {
+    getModel,
     getChatModel,
-    listAvailableModels
+    listAvailableModels,
 };
