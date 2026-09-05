@@ -30,7 +30,7 @@ app.get("/", (req, res) => {
 });
 
 // API Routes
-app.use('/api/ai', aiAgentRoutes);
+app.use('/api/ai/chat', aiAgentRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
