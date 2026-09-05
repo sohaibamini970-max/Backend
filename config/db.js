@@ -7,13 +7,26 @@ if (!process.env.DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+
   ssl: {
     rejectUnauthorized: false,
   },
+
+  // Keep the number of connections low on Vercel
+  max: 5,
+
+  // Close idle connections after 10 seconds
+  idleTimeoutMillis: 10000,
+
+  // Don't wait forever for a connection
+  connectionTimeoutMillis: 10000,
+
+  // Recycle connections periodically
+  maxLifetimeSeconds: 60,
 });
 
 pool.on("connect", () => {
-  console.log("Connected to PostgreSQL");
+  console.log("PostgreSQL connection established");
 });
 
 pool.on("error", (err) => {
