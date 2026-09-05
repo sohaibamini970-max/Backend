@@ -10,6 +10,46 @@ const {authenticate} = require('../middleware/authMiddleware');
  * @access  Private (All authenticated users)
  * @body    { message: string, conversationHistory?: array }
  */
+
+// Add this to routes/aiAgentRoutes.js
+router.get('/models', authenticate, async (req, res) => {
+    try {
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY;
+        
+        if (!apiKey) {
+            return res.status(400).json({
+                success: false,
+                error: 'API key not configured'
+            });
+        }
+        
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const models = await genAI.listModels();
+        
+        // Filter only Gemini models
+        const geminiModels = models.models
+            .filter(m => m.name.includes('gemini'))
+            .map(m => ({
+                name: m.name,
+                displayName: m.displayName,
+                supportedMethods: m.supportedGenerationMethods
+            }));
+        
+        res.status(200).json({
+            success: true,
+            availableModels: geminiModels,
+            recommendedModel: 'gemini-1.0-pro'
+        });
+    } catch (error) {
+        console.error('Error listing models:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 router.post('/chat',authenticate, aiAgentController.handleAIAgent);
 
 /**
