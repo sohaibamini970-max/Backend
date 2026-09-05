@@ -20,7 +20,7 @@ const getModel = () => {
 // Get chat model with system instruction
 const getChatModel = () => {
     return genAI.getGenerativeModel({
-        model: "gemini-3.6-pro",
+        model: "gemini-3.5-pro",
         systemInstruction: `You are an AI assistant for a Project Management System. 
         You can help users manage projects, tasks, assignments, and submissions.
         You have access to the following functions/tools:
