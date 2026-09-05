@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const aiAgentController = require('../controllers/aiAgentController');
-const {authenticate} = require('../middleware/authMiddleware');
+const {authenticate} = require('../middleware/authMiddleware'); 
 
 /**
  * @route   POST /api/ai/chat
