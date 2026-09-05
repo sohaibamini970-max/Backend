@@ -1,65 +1,105 @@
 // config/gemini.js
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+// ✅ Get API key from environment (Google AI Studio key)
+const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY;
 
-// Get the model
+if (!apiKey) {
+    console.error('❌ GOOGLE_API_KEY is not set in environment variables');
+    console.error('Get your API key from: https://aistudio.google.com/app/apikey');
+    console.error('Then add it to your .env file: GOOGLE_API_KEY=your-key-here');
+}
+
+// Initialize Gemini with your API key
+const genAI = new GoogleGenerativeAI(apiKey);
+
+// ✅ CORRECT MODEL NAMES for Google AI Studio
+// gemini-1.5-flash - Fast, cheap, good for most tasks (RECOMMENDED)
+// gemini-1.5-pro - More capable, more expensive
+// gemini-1.0-pro - Older version (fallback)
+
+const MODEL_NAME = "gemini-1.5-flash"; // Best for most use cases
+
+// Get model for content generation
 const getModel = () => {
-    return genAI.getGenerativeModel({
-        model: "gemini-3.5-pro", // or "gemini-1.5-flash" for faster responses
-        generationConfig: {
-            temperature: 0.3,
-            topK: 32,
-            topP: 0.95,
-            maxOutputTokens: 8192,
-        },
-    });
+    try {
+        return genAI.getGenerativeModel({
+            model: MODEL_NAME,
+            generationConfig: {
+                temperature: 0.3,
+                topK: 32,
+                topP: 0.95,
+                maxOutputTokens: 2048,
+            },
+        });
+    } catch (error) {
+        console.error('Error creating model:', error.message);
+        // Fallback to gemini-1.0-pro if 1.5-flash isn't available
+        try {
+            console.log('⚠️ Falling back to gemini-1.0-pro...');
+            return genAI.getGenerativeModel({
+                model: "gemini-1.0-pro",
+                generationConfig: {
+                    temperature: 0.3,
+                    maxOutputTokens: 2048,
+                },
+            });
+        } catch (fallbackError) {
+            console.error('❌ Fallback also failed:', fallbackError.message);
+            throw new Error('No available Gemini models');
+        }
+    }
 };
 
 // Get chat model with system instruction
 const getChatModel = () => {
-    return genAI.getGenerativeModel({
-        model: "gemini-3.5-pro",
-        systemInstruction: `You are an AI assistant for a Project Management System. 
-        You can help users manage projects, tasks, assignments, and submissions.
-        You have access to the following functions/tools:
-        
-        1. createProject - Creates a new project
-        2. updateProject - Updates existing project
-        3. deleteProject - Deletes a project
-        4. assignProject - Assigns project to a manager
-        5. unassignProject - Unassigns project from manager
-        6. createTask - Creates a new task
-        7. updateTaskStatus - Updates task status
-        8. deleteTask - Deletes a task
-        9. submitWork - Submits work for a task
-        10. getProjects - Lists all projects
-        11. getTasks - Lists tasks for a project or user
-        12. getUsers - Lists all users
-        13. getProjectManagers - Lists project managers
-        
-        When a user asks to perform an action, extract the required parameters
-        and call the appropriate function. If any required parameters are missing,
-        ask the user for them.
-        
-        For project creation, if no description is provided, generate a professional
-        project description based on the project name and domain.
-        
-        Always check role-based permissions:
-        - Only Executive Manager and System Administrator can create projects
-        - Only Executive Manager and System Administrator can delete projects
-        - Only Project Manager can change project status
-        - Only Members can submit work for tasks assigned to them
-        
-        Respond in a helpful, professional tone. Be concise but thorough.`,
-        generationConfig: {
-            temperature: 0.3,
-            topK: 32,
-            topP: 0.95,
-            maxOutputTokens: 8192,
-        },
-    });
+    try {
+        // Use gemini-1.5-flash for chat (it supports system instructions)
+        const model = genAI.getGenerativeModel({
+            model: "gemini-1.5-flash",
+            generationConfig: {
+                temperature: 0.3,
+                topK: 32,
+                topP: 0.95,
+                maxOutputTokens: 2048,
+            },
+        });
+        return model;
+    } catch (error) {
+        console.error('Error creating chat model:', error.message);
+        // Fallback to gemini-1.0-pro (no system instructions, but works)
+        try {
+            console.log('⚠️ Falling back to gemini-1.0-pro for chat...');
+            const model = genAI.getGenerativeModel({
+                model: "gemini-1.0-pro",
+                generationConfig: {
+                    temperature: 0.3,
+                    maxOutputTokens: 2048,
+                },
+            });
+            return model;
+        } catch (fallbackError) {
+            console.error('❌ Fallback also failed:', fallbackError.message);
+            throw new Error('No available Gemini models');
+        }
+    }
 };
 
-module.exports = { getModel, getChatModel };
+// Optional: List available models (for debugging)
+const listAvailableModels = async () => {
+    try {
+        const models = await genAI.listModels();
+        console.log('✅ Available models:', models.models.map(m => m.name).join(', '));
+        return models;
+    } catch (error) {
+        console.error('Error listing models:', error.message);
+        return null;
+    }
+};
+
+module.exports = { 
+    getModel, 
+    getChatModel,
+    listAvailableModels,
+    genAI // Export for debugging
+};
