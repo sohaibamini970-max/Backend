@@ -1137,293 +1137,294 @@ const functions = {
         }
     },
 
-    assignProject: async (params, user) => {
-
-        const {
-            projectId,
-            projectName,
-            managerId,
-            managerName
-        } = params || {};
-
-        console.log("🔍 assignProject called:", {
-            projectId,
-            projectName,
-            managerId,
-            managerName,
-            userRole: user?.role
-        });
-
-        // =====================================================
-        // PERMISSION
-        // =====================================================
-
-        if (
-            ![
-                "Executive Manager",
-                "System Administrator"
-            ].includes(user?.role)
-        ) {
-            return {
-                success: false,
-                error:
-                    "Only Executive Managers and System Administrators can assign projects."
-            };
-        }
-
-        // =====================================================
-        // PROJECT REQUIRED
-        // =====================================================
-
-        if (!projectId && !projectName) {
-
-            return {
-                success: false,
-                requiresProjectSelection: true,
-                error: "Please provide the project name or project ID."
-            };
-        }
-
-        // =====================================================
-        // MANAGER REQUIRED
-        // =====================================================
-
-        if (!managerId && !managerName) {
-
-            return {
-                success: false,
-                requiresManagerSelection: true,
-                error:
-                    "Please provide the Project Manager name or manager ID."
-            };
-        }
-
-        // =====================================================
-        // RESOLVE PROJECT
-        // =====================================================
-
-        let resolvedProjectId = projectId;
-        let resolvedProjectName = projectName;
-
-        if (!resolvedProjectId) {
-
-            const projectResult =
-                await functions.getProjects({}, user);
-
-            if (!projectResult.success) {
-                return projectResult;
-            }
-
-            const projects =
-                projectResult.projects || [];
-
-            const normalizedName =
-                String(projectName)
-                    .trim()
-                    .toLowerCase();
-
-            const matches =
-                projects.filter(project =>
-                    String(
-                        project.name ||
-                        project.projectName ||
-                        ""
-                    )
-                        .trim()
-                        .toLowerCase() === normalizedName
-                );
-
-            if (matches.length === 0) {
-
-                return {
-                    success: false,
-                    requiresProjectSelection: true,
-                    projectName,
-                    error:
-                        `No project named "${projectName}" was found.`
-                };
-            }
-
-            if (matches.length > 1) {
-
-                return {
-                    success: false,
-                    requiresProjectSelection: true,
-                    multipleProjects: true,
-                    projectName,
-
-                    projects: matches.map(project => ({
-                        id: project.id,
-                        name:
-                            project.name ||
-                            project.projectName,
-                        status: project.status || null,
-                        priority: project.priority || null
-                    })),
-
-                    error:
-                        `Multiple projects named "${projectName}" were found.`
-                };
-            }
-
-            resolvedProjectId = matches[0].id;
-
-            resolvedProjectName =
-                matches[0].name ||
-                matches[0].projectName ||
-                projectName;
-        }
-
-        // =====================================================
-        // RESOLVE MANAGER
-        // =====================================================
-
-        let resolvedManagerId = managerId;
-        let resolvedManagerName = managerName;
-
-        if (!resolvedManagerId) {
-
-            const managerResult =
-                await functions.getProjectManagers({}, user);
-
-            if (!managerResult.success) {
-                return managerResult;
-            }
-
-            const managers =
-                managerResult.projectManagers ||
-                managerResult.managers ||
-                managerResult.users ||
-                [];
-
-            const normalizedName =
-                String(managerName)
-                    .trim()
-                    .toLowerCase();
-
-            const matches =
-                managers.filter(manager =>
-                    String(
-                        manager.fullName ||
-                        manager.name ||
-                        manager.userName ||
-                        ""
-                    )
-                        .trim()
-                        .toLowerCase() === normalizedName
-                );
-
-            if (matches.length === 0) {
-
-                return {
-                    success: false,
-                    requiresManagerSelection: true,
-                    managerName,
-
-                    error:
-                        `No Project Manager named "${managerName}" was found.`
-                };
-            }
-
-            if (matches.length > 1) {
-
-                return {
-                    success: false,
-                    requiresManagerSelection: true,
-                    multipleManagers: true,
-                    managerName,
-
-                    managers: matches.map(manager => ({
-                        id: manager.id,
-                        fullName:
-                            manager.fullName ||
-                            manager.name ||
-                            manager.userName,
-                        email: manager.email || null
-                    })),
-
-                    error:
-                        `Multiple Project Managers named "${managerName}" were found.`
-                };
-            }
-
-            resolvedManagerId = matches[0].id;
-
-            resolvedManagerName =
-                matches[0].fullName ||
-                matches[0].name ||
-                matches[0].userName ||
-                managerName;
-        }
-
-        // =====================================================
-        // ASSIGN PROJECT
-        // =====================================================
-
-        const req = {
-
-            params: {
-                projectId: resolvedProjectId
-            },
-
-            body: {
-                managerId: resolvedManagerId
-            },
-
-            user
-        };
-
-        const res = {
-
-            status: (code) => ({
-
-                json: (data) => ({
-                    status: code,
-                    data
-                }),
-
-                send: (data) => ({
-                    data
-                })
-            })
-        };
-
+    assignProject: async (params, req) => {
         try {
+            const {
+                projectId,
+                projectName,
+                managerId,
+                managerName
+            } = params;
 
-            const result =
-                await projectController.assignProject(
-                    req,
-                    res
+            const currentUser = getCurrentUser(req);
+
+            console.log("🤖 AI assignProject request:", {
+                projectId,
+                projectName,
+                managerId,
+                managerName,
+                currentUser: currentUser?.id,
+                role: currentUser?.role
+            });
+
+            /* =========================================================
+               PERMISSION
+            ========================================================= */
+
+            if (
+                currentUser?.role !== "Executive Manager" &&
+                currentUser?.role !== "System Administrator"
+            ) {
+                return {
+                    success: false,
+                    message: "Only an Executive Manager or System Administrator can assign projects."
+                };
+            }
+
+            /* =========================================================
+               PROJECT IDENTIFICATION
+            ========================================================= */
+
+            let resolvedProjectId = projectId;
+
+            if (!resolvedProjectId && !projectName) {
+                return {
+                    success: false,
+                    message: "Please provide the project name or project ID."
+                };
+            }
+
+            /*
+             * If project ID was not provided,
+             * find the project using its exact name.
+             */
+
+            if (!resolvedProjectId) {
+                const projectResult = await pool.query(
+                    `
+                SELECT
+                    id,
+                    name,
+                    status,
+                    priority,
+                    project_manager_id
+                FROM projects
+                WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+                ORDER BY name ASC
+                `,
+                    [projectName]
                 );
 
-            const assignmentResult =
-                result?.data || result;
+                console.log(
+                    "🔎 Project lookup:",
+                    projectName,
+                    "matches:",
+                    projectResult.rows.length
+                );
 
-            return {
+                if (projectResult.rows.length === 0) {
+                    return {
+                        success: false,
+                        message: `No project named "${projectName}" was found.`
+                    };
+                }
 
-                ...assignmentResult,
+                if (projectResult.rows.length > 1) {
+                    return {
+                        success: false,
+                        requiresProjectSelection: true,
+                        message: `Multiple projects named "${projectName}" were found. Please provide the project ID.`,
+                        projects: projectResult.rows.map(project => ({
+                            id: project.id,
+                            name: project.name,
+                            status: project.status,
+                            priority: project.priority
+                        }))
+                    };
+                }
 
-                projectId: resolvedProjectId,
+                resolvedProjectId = projectResult.rows[0].id;
+            }
 
-                projectName: resolvedProjectName,
+            /* =========================================================
+               MANAGER IDENTIFICATION
+            ========================================================= */
 
-                managerId: resolvedManagerId,
+            let resolvedManagerId = managerId;
 
-                managerName: resolvedManagerName
+            if (!resolvedManagerId && !managerName) {
+                return {
+                    success: false,
+                    message: "Please provide the Project Manager name or manager ID."
+                };
+            }
+
+            /*
+             * If manager ID was not provided,
+             * find the Project Manager by full name.
+             */
+
+            if (!resolvedManagerId) {
+                const managerResult = await pool.query(
+                    `
+                SELECT
+                    id,
+                    full_name,
+                    email,
+                    role,
+                    is_active
+                FROM users
+                WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+                  AND LOWER(TRIM(role)) = LOWER(TRIM('Project Manager'))
+                  AND is_active = TRUE
+                ORDER BY full_name ASC
+                `,
+                    [managerName]
+                );
+
+                console.log(
+                    "🔎 Manager lookup:",
+                    managerName,
+                    "matches:",
+                    managerResult.rows.length
+                );
+
+                if (managerResult.rows.length === 0) {
+
+                    /*
+                     * Extra diagnostic lookup.
+                     *
+                     * This checks whether the person exists but has
+                     * another role or is inactive.
+                     */
+
+                    const userCheck = await pool.query(
+                        `
+                    SELECT
+                        id,
+                        full_name,
+                        email,
+                        role,
+                        is_active
+                    FROM users
+                    WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+                    ORDER BY full_name ASC
+                    `,
+                        [managerName]
+                    );
+
+                    console.log(
+                        "🔎 User diagnostic lookup:",
+                        userCheck.rows
+                    );
+
+                    if (userCheck.rows.length > 0) {
+                        return {
+                            success: false,
+                            message: `"${managerName}" exists, but is not an active Project Manager.`,
+                            users: userCheck.rows.map(user => ({
+                                id: user.id,
+                                fullName: user.full_name,
+                                email: user.email,
+                                role: user.role,
+                                isActive: user.is_active
+                            }))
+                        };
+                    }
+
+                    return {
+                        success: false,
+                        message: `No active Project Manager named "${managerName}" was found.`
+                    };
+                }
+
+                /*
+                 * Same manager name exists multiple times.
+                 */
+
+                if (managerResult.rows.length > 1) {
+                    return {
+                        success: false,
+                        requiresManagerSelection: true,
+                        message: `Multiple Project Managers named "${managerName}" were found. Please provide the manager ID.`,
+                        managers: managerResult.rows.map(manager => ({
+                            id: manager.id,
+                            fullName: manager.full_name,
+                            email: manager.email
+                        }))
+                    };
+                }
+
+                resolvedManagerId = managerResult.rows[0].id;
+            }
+
+            /* =========================================================
+               CALL REAL PROJECT CONTROLLER
+            ========================================================= */
+
+            const originalParams = req.params;
+            const originalBody = req.body;
+
+            req.params = {
+                ...originalParams,
+                projectId: resolvedProjectId
             };
 
-        } catch (error) {
+            req.body = {
+                ...originalBody,
+                managerId: resolvedManagerId
+            };
 
-            console.error(
-                "❌ Assign project error:",
-                error
+            let controllerResponse;
+
+            const mockRes = {
+                status(code) {
+                    controllerResponse = {
+                        statusCode: code,
+                        data: null
+                    };
+
+                    return {
+                        json(data) {
+                            controllerResponse.data = data;
+                            return data;
+                        }
+                    };
+                },
+
+                json(data) {
+                    controllerResponse = {
+                        statusCode: 200,
+                        data
+                    };
+
+                    return data;
+                }
+            };
+
+            await projectController.assignProject(req, mockRes);
+
+            /*
+             * Restore request objects.
+             */
+
+            req.params = originalParams;
+            req.body = originalBody;
+
+            console.log(
+                "🤖 assignProject controller response:",
+                controllerResponse
             );
 
+            if (
+                !controllerResponse ||
+                !controllerResponse.data
+            ) {
+                return {
+                    success: false,
+                    message: "Project assignment did not return a valid response."
+                };
+            }
+
+            return controllerResponse.data;
+
+        } catch (error) {
+            console.error("❌ AI assignProject error:", error);
+
             return {
                 success: false,
-                error:
-                    error.message ||
-                    "Failed to assign project"
+                message: "Failed to assign project.",
+                error: error.message
             };
         }
     },
