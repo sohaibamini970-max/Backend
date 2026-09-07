@@ -15,7 +15,7 @@ const {
   getProjectTasks,
 
   getTask,
-
+  getTasks,
   createTask,
 
   updateTask,
@@ -30,6 +30,12 @@ const {
   getMyProjects
 
 } = require("../controllers/taskcontroller");
+
+router.get(
+  "/",
+  authenticate,
+  getTasks
+);
 
 // Get all tasks for a project
 
