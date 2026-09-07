@@ -5,7 +5,7 @@ const jwt = require("jsonwebtoken");
 
 /* =========================================================
    HELPER: SAFE DATABASE QUERY WITH CONNECTION RELEASE
-========================================================= */
+========================================================= */ 
 
 const safeQuery = async (text, params) => {
     const client = await pool.connect();
