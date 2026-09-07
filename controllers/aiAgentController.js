@@ -4,7 +4,7 @@ const projectController = require('./projectcontroller');
 const taskController = require('./taskcontroller');
 const userController = require('./usercontroller');
 const submissionController = require('./tasksubmissioncontroller');
-
+const pool = require('../config/db');
 // Helper to get current user
 const getCurrentUser = (req) => {
     return req.user || null;
@@ -1137,61 +1137,71 @@ const functions = {
         }
     },
 
-    assignProject: async (params, req) => {
-        try {
-            const {
-                projectId,
-                projectName,
-                managerId,
-                managerName
-            } = params;
+  assignProject: async (params, user) => {
+    try {
+        const {
+            projectId,
+            projectName,
+            managerId,
+            managerName
+        } = params;
 
-            const currentUser = getCurrentUser(req);
+        // handleAIAgent() passes the logged-in user directly
+        const currentUser = user;
 
-            console.log("🤖 AI assignProject request:", {
-                projectId,
-                projectName,
-                managerId,
-                managerName,
-                currentUser: currentUser?.id,
-                role: currentUser?.role
-            });
+        // Normalize role to avoid case/space mismatch
+        const currentRole = String(
+            currentUser?.role || ""
+        )
+            .trim()
+            .toLowerCase();
 
-            /* =========================================================
-               PERMISSION
-            ========================================================= */
+        console.log("🤖 AI assignProject request:", {
+            projectId,
+            projectName,
+            managerId,
+            managerName,
+            currentUser: currentUser?.id,
+            role: currentUser?.role,
+            normalizedRole: currentRole
+        });
 
-            if (
-                currentUser?.role !== "Executive Manager" &&
-                currentUser?.role !== "System Administrator"
-            ) {
-                return {
-                    success: false,
-                    message: "Only an Executive Manager or System Administrator can assign projects."
-                };
-            }
+        // =========================================================
+        // PERMISSION CHECK
+        // Executive Manager OR System Administrator can assign
+        // projects.
+        // =========================================================
+        const canAssignProject =
+            currentRole === "executive manager" ||
+            currentRole === "system administrator";
 
-            /* =========================================================
-               PROJECT IDENTIFICATION
-            ========================================================= */
+        if (!canAssignProject) {
+            return {
+                success: false,
+                message:
+                    "Only an Executive Manager or System Administrator can assign projects."
+            };
+        }
 
-            let resolvedProjectId = projectId;
+        // =========================================================
+        // VALIDATE PROJECT INPUT
+        // =========================================================
+        if (!projectId && !projectName) {
+            return {
+                success: false,
+                message:
+                    "Please provide the project name or project ID."
+            };
+        }
 
-            if (!resolvedProjectId && !projectName) {
-                return {
-                    success: false,
-                    message: "Please provide the project name or project ID."
-                };
-            }
+        // =========================================================
+        // RESOLVE PROJECT
+        // =========================================================
+        let resolvedProjectId = projectId;
 
-            /*
-             * If project ID was not provided,
-             * find the project using its exact name.
-             */
-
-            if (!resolvedProjectId) {
-                const projectResult = await pool.query(
-                    `
+        if (!resolvedProjectId) {
+            const projectResult = await pool.query(
+                `
                 SELECT
                     id,
                     name,
@@ -1202,61 +1212,64 @@ const functions = {
                 WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
                 ORDER BY name ASC
                 `,
-                    [projectName]
-                );
+                [projectName]
+            );
 
-                console.log(
-                    "🔎 Project lookup:",
-                    projectName,
-                    "matches:",
-                    projectResult.rows.length
-                );
+            console.log(
+                "🔎 Project lookup:",
+                projectName,
+                "matches:",
+                projectResult.rows.length
+            );
 
-                if (projectResult.rows.length === 0) {
-                    return {
-                        success: false,
-                        message: `No project named "${projectName}" was found.`
-                    };
-                }
-
-                if (projectResult.rows.length > 1) {
-                    return {
-                        success: false,
-                        requiresProjectSelection: true,
-                        message: `Multiple projects named "${projectName}" were found. Please provide the project ID.`,
-                        projects: projectResult.rows.map(project => ({
-                            id: project.id,
-                            name: project.name,
-                            status: project.status,
-                            priority: project.priority
-                        }))
-                    };
-                }
-
-                resolvedProjectId = projectResult.rows[0].id;
-            }
-
-            /* =========================================================
-               MANAGER IDENTIFICATION
-            ========================================================= */
-
-            let resolvedManagerId = managerId;
-
-            if (!resolvedManagerId && !managerName) {
+            // No project found
+            if (projectResult.rows.length === 0) {
                 return {
                     success: false,
-                    message: "Please provide the Project Manager name or manager ID."
+                    message:
+                        `No project named "${projectName}" was found.`
                 };
             }
 
-            /*
-             * If manager ID was not provided,
-             * find the Project Manager by full name.
-             */
+            // Multiple projects with same name
+            if (projectResult.rows.length > 1) {
+                return {
+                    success: false,
+                    requiresProjectSelection: true,
+                    message:
+                        `Multiple projects named "${projectName}" were found. Please provide the project ID.`,
+                    projects: projectResult.rows.map(project => ({
+                        id: project.id,
+                        name: project.name,
+                        status: project.status,
+                        priority: project.priority
+                    }))
+                };
+            }
 
-            if (!resolvedManagerId) {
-                const managerResult = await pool.query(
-                    `
+            resolvedProjectId = projectResult.rows[0].id;
+        }
+
+        // =========================================================
+        // VALIDATE MANAGER INPUT
+        // =========================================================
+        if (!managerId && !managerName) {
+            return {
+                success: false,
+                message:
+                    "Please provide the Project Manager name or manager ID."
+            };
+        }
+
+        // =========================================================
+        // RESOLVE PROJECT MANAGER
+        // ONLY ACTIVE PROJECT MANAGERS ARE ALLOWED
+        // =========================================================
+        let resolvedManagerId = managerId;
+
+        if (!resolvedManagerId) {
+            const managerResult = await pool.query(
+                `
                 SELECT
                     id,
                     full_name,
@@ -1269,27 +1282,25 @@ const functions = {
                   AND is_active = TRUE
                 ORDER BY full_name ASC
                 `,
-                    [managerName]
-                );
+                [managerName]
+            );
 
-                console.log(
-                    "🔎 Manager lookup:",
-                    managerName,
-                    "matches:",
-                    managerResult.rows.length
-                );
+            console.log(
+                "🔎 Manager lookup:",
+                managerName,
+                "matches:",
+                managerResult.rows.length
+            );
 
-                if (managerResult.rows.length === 0) {
+            // =====================================================
+            // NO ACTIVE PROJECT MANAGER FOUND
+            // =====================================================
+            if (managerResult.rows.length === 0) {
 
-                    /*
-                     * Extra diagnostic lookup.
-                     *
-                     * This checks whether the person exists but has
-                     * another role or is inactive.
-                     */
-
-                    const userCheck = await pool.query(
-                        `
+                // Check whether the name exists under another role
+                // or inactive account. This gives a better message.
+                const userCheck = await pool.query(
+                    `
                     SELECT
                         id,
                         full_name,
@@ -1300,134 +1311,203 @@ const functions = {
                     WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
                     ORDER BY full_name ASC
                     `,
-                        [managerName]
-                    );
+                    [managerName]
+                );
 
-                    console.log(
-                        "🔎 User diagnostic lookup:",
-                        userCheck.rows
-                    );
+                console.log(
+                    "🔎 User diagnostic lookup:",
+                    userCheck.rows
+                );
 
-                    if (userCheck.rows.length > 0) {
-                        return {
-                            success: false,
-                            message: `"${managerName}" exists, but is not an active Project Manager.`,
-                            users: userCheck.rows.map(user => ({
-                                id: user.id,
-                                fullName: user.full_name,
-                                email: user.email,
-                                role: user.role,
-                                isActive: user.is_active
-                            }))
-                        };
-                    }
-
+                if (userCheck.rows.length > 0) {
                     return {
                         success: false,
-                        message: `No active Project Manager named "${managerName}" was found.`
-                    };
-                }
-
-                /*
-                 * Same manager name exists multiple times.
-                 */
-
-                if (managerResult.rows.length > 1) {
-                    return {
-                        success: false,
-                        requiresManagerSelection: true,
-                        message: `Multiple Project Managers named "${managerName}" were found. Please provide the manager ID.`,
-                        managers: managerResult.rows.map(manager => ({
-                            id: manager.id,
-                            fullName: manager.full_name,
-                            email: manager.email
+                        message:
+                            `"${managerName}" exists, but is not an active Project Manager.`,
+                        users: userCheck.rows.map(existingUser => ({
+                            id: existingUser.id,
+                            fullName: existingUser.full_name,
+                            email: existingUser.email,
+                            role: existingUser.role,
+                            isActive: existingUser.is_active
                         }))
                     };
                 }
 
-                resolvedManagerId = managerResult.rows[0].id;
-            }
-
-            /* =========================================================
-               CALL REAL PROJECT CONTROLLER
-            ========================================================= */
-
-            const originalParams = req.params;
-            const originalBody = req.body;
-
-            req.params = {
-                ...originalParams,
-                projectId: resolvedProjectId
-            };
-
-            req.body = {
-                ...originalBody,
-                managerId: resolvedManagerId
-            };
-
-            let controllerResponse;
-
-            const mockRes = {
-                status(code) {
-                    controllerResponse = {
-                        statusCode: code,
-                        data: null
-                    };
-
-                    return {
-                        json(data) {
-                            controllerResponse.data = data;
-                            return data;
-                        }
-                    };
-                },
-
-                json(data) {
-                    controllerResponse = {
-                        statusCode: 200,
-                        data
-                    };
-
-                    return data;
-                }
-            };
-
-            await projectController.assignProject(req, mockRes);
-
-            /*
-             * Restore request objects.
-             */
-
-            req.params = originalParams;
-            req.body = originalBody;
-
-            console.log(
-                "🤖 assignProject controller response:",
-                controllerResponse
-            );
-
-            if (
-                !controllerResponse ||
-                !controllerResponse.data
-            ) {
                 return {
                     success: false,
-                    message: "Project assignment did not return a valid response."
+                    message:
+                        `No active Project Manager named "${managerName}" was found.`
                 };
             }
 
-            return controllerResponse.data;
+            // =====================================================
+            // MULTIPLE MANAGERS WITH SAME NAME
+            // =====================================================
+            if (managerResult.rows.length > 1) {
+                return {
+                    success: false,
+                    requiresManagerSelection: true,
+                    message:
+                        `Multiple Project Managers named "${managerName}" were found. Please provide the manager ID.`,
+                    managers: managerResult.rows.map(manager => ({
+                        id: manager.id,
+                        fullName: manager.full_name,
+                        email: manager.email
+                    }))
+                };
+            }
 
-        } catch (error) {
-            console.error("❌ AI assignProject error:", error);
+            resolvedManagerId = managerResult.rows[0].id;
+        }
 
+        // =========================================================
+        // IF MANAGER ID WAS PROVIDED DIRECTLY
+        // VERIFY THAT IT BELONGS TO AN ACTIVE PROJECT MANAGER
+        // =========================================================
+        if (resolvedManagerId) {
+            const managerVerifyResult = await pool.query(
+                `
+                SELECT
+                    id,
+                    full_name,
+                    email,
+                    role,
+                    is_active
+                FROM users
+                WHERE id = $1
+                `,
+                [resolvedManagerId]
+            );
+
+            if (managerVerifyResult.rows.length === 0) {
+                return {
+                    success: false,
+                    message:
+                        `No user was found with manager ID "${resolvedManagerId}".`
+                };
+            }
+
+            const manager = managerVerifyResult.rows[0];
+
+            const managerRole = String(
+                manager.role || ""
+            )
+                .trim()
+                .toLowerCase();
+
+            if (
+                managerRole !== "project manager" ||
+                manager.is_active !== true
+            ) {
+                return {
+                    success: false,
+                    message:
+                        `"${manager.full_name}" is not an active Project Manager and cannot receive a project.`,
+                    manager: {
+                        id: manager.id,
+                        fullName: manager.full_name,
+                        email: manager.email,
+                        role: manager.role,
+                        isActive: manager.is_active
+                    }
+                };
+            }
+        }
+
+        // =========================================================
+        // CREATE EXPRESS-LIKE REQUEST FOR EXISTING CONTROLLER
+        // IMPORTANT:
+        // Do NOT modify the real req object because this function
+        // receives "user", not Express req.
+        // =========================================================
+        const controllerReq = {
+            params: {
+                projectId: resolvedProjectId
+            },
+            body: {
+                managerId: resolvedManagerId
+            },
+            user: currentUser
+        };
+
+        // =========================================================
+        // MOCK EXPRESS RESPONSE
+        // This allows us to reuse projectController.assignProject()
+        // =========================================================
+        let controllerResponse;
+
+        const mockRes = {
+            status(code) {
+                controllerResponse = {
+                    statusCode: code,
+                    data: null
+                };
+
+                return {
+                    json(data) {
+                        controllerResponse.data = data;
+                        return data;
+                    }
+                };
+            },
+
+            json(data) {
+                controllerResponse = {
+                    statusCode: 200,
+                    data
+                };
+
+                return data;
+            }
+        };
+
+        // =========================================================
+        // CALL EXISTING PROJECT CONTROLLER
+        // =========================================================
+        await projectController.assignProject(
+            controllerReq,
+            mockRes
+        );
+
+        console.log(
+            "🤖 assignProject controller response:",
+            controllerResponse
+        );
+
+        // =========================================================
+        // VALIDATE CONTROLLER RESPONSE
+        // =========================================================
+        if (
+            !controllerResponse ||
+            !controllerResponse.data
+        ) {
             return {
                 success: false,
-                message: "Failed to assign project.",
-                error: error.message
+                message:
+                    "Project assignment did not return a valid response."
             };
         }
-    },
+
+        // =========================================================
+        // RETURN CONTROLLER RESULT TO AI AGENT
+        // =========================================================
+        return controllerResponse.data;
+
+    } catch (error) {
+        console.error(
+            "❌ AI assignProject error:",
+            error
+        );
+
+        return {
+            success: false,
+            message:
+                "Failed to assign project.",
+            error: error.message
+        };
+    }
+},
 
     assignTask: async (params, user) => {
 
