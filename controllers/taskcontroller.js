@@ -944,6 +944,156 @@ const getTaskStats = async (req, res) => {
     }
 };
 
+const getTasks = async (req, res) => {
+    try {
+        const { 
+            taskName, 
+            taskId, 
+            projectName, 
+            projectId, 
+            status, 
+            assigneeName, 
+            assigneeId 
+        } = req.query || {};
+
+        console.log('🔍 getTasks called with filters:', {
+            taskName,
+            taskId,
+            projectName,
+            projectId,
+            status,
+            assigneeName,
+            assigneeId,
+            userId: req.user?.id,
+            role: req.user?.role
+        });
+
+        const userId = req.user?.id;
+        const userRole = req.user?.role;
+
+        let query = `
+            SELECT 
+                t.id,
+                t.project_id,
+                t.name,
+                t.description,
+                t.status,
+                t.priority,
+                t.assignee_id,
+                t.start_date,
+                t.due_date,
+                t.created_by,
+                t.created_at,
+                t.updated_at,
+                u.full_name as assignee_name,
+                u.email as assignee_email,
+                p.name as project_name,
+                p.domain as project_domain
+            FROM tasks t
+            LEFT JOIN users u ON t.assignee_id = u.id
+            LEFT JOIN projects p ON t.project_id = p.id
+            WHERE 1=1
+        `;
+
+        const params = [];
+        let paramIndex = 1;
+
+        const isMember = userRole === 'Member';
+        const isProjectManager = userRole === 'Project Manager';
+
+        if (isMember) {
+            query += ` AND t.assignee_id = $${paramIndex}`;
+            params.push(userId);
+            paramIndex++;
+        } else if (isProjectManager) {
+            query += ` AND p.project_manager_id = $${paramIndex}`;
+            params.push(userId);
+            paramIndex++;
+        }
+
+        if (taskName) {
+            query += ` AND LOWER(TRIM(t.name)) = LOWER(TRIM($${paramIndex}))`;
+            params.push(taskName);
+            paramIndex++;
+        }
+
+        if (taskId) {
+            query += ` AND t.id = $${paramIndex}`;
+            params.push(taskId);
+            paramIndex++;
+        }
+
+        if (projectName) {
+            query += ` AND LOWER(TRIM(p.name)) = LOWER(TRIM($${paramIndex}))`;
+            params.push(projectName);
+            paramIndex++;
+        }
+
+        if (projectId) {
+            query += ` AND t.project_id = $${paramIndex}`;
+            params.push(projectId);
+            paramIndex++;
+        }
+
+        if (status) {
+            query += ` AND LOWER(TRIM(t.status)) = LOWER(TRIM($${paramIndex}))`;
+            params.push(status);
+            paramIndex++;
+        }
+
+        if (assigneeName) {
+            query += ` AND LOWER(TRIM(u.full_name)) = LOWER(TRIM($${paramIndex}))`;
+            params.push(assigneeName);
+            paramIndex++;
+        }
+
+        if (assigneeId) {
+            query += ` AND t.assignee_id = $${paramIndex}`;
+            params.push(assigneeId);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY t.created_at DESC`;
+
+        const result = await safeQuery(query, params);
+
+        console.log(`✅ Found ${result.rows.length} tasks`);
+
+        if (req._isAIAgent) {
+            return {
+                success: true,
+                tasks: result.rows,
+                count: result.rows.length
+            };
+        }
+
+        return res.status(200).json({
+            success: true,
+            tasks: result.rows,
+            count: result.rows.length
+        });
+
+    } catch (error) {
+        console.error("❌ Get tasks error:", error);
+        console.error("Stack:", error.stack);
+
+        if (req._isAIAgent) {
+            return {
+                success: false,
+                error: error.message || 'Failed to retrieve tasks',
+                tasks: []
+            };
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve tasks.",
+            ...(process.env.NODE_ENV !== 'production' && { error: error.message })
+        });
+    }
+};
+
+
 module.exports = {
     getProjectTasks,
     getTask,
@@ -954,5 +1104,6 @@ module.exports = {
     assignTask,
     getMyTasks,
     getMyProjects,
-    getTaskStats
+    getTaskStats,
+    getTask
 };
