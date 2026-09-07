@@ -404,6 +404,7 @@ const getCurrentUser = async (req, res) => {
             success: false,
             message: "Internal server error.",
         });
+       console.log(error);
     }
 };
 
