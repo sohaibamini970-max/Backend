@@ -1622,7 +1622,7 @@ const functions = {
                         t.status,
                         t.project_id,
                         p.name AS project_name,
-                        t.assigned_id
+                        t.assignee_id
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
@@ -1651,7 +1651,7 @@ const functions = {
                         t.status,
                         t.project_id,
                         p.name AS project_name,
-                        t.assigned_id
+                        t.assignee_id
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
@@ -1680,7 +1680,7 @@ const functions = {
                         t.status,
                         t.project_id,
                         p.name AS project_name,
-                        t.assigned_to
+                        t.assignee_id
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
@@ -1746,7 +1746,7 @@ const functions = {
                         projectId: task.project_id,
                         projectName: task.project_name,
                         status: task.status,
-                        assignedTo: task.assigned_to
+                        assignedTo: task.assignee_id
                     })),
 
                     error:
@@ -1789,7 +1789,7 @@ const functions = {
                     t.status,
                     t.project_id,
                     p.name AS project_name,
-                    t.assigned_to
+                    t.assignee_id
                 FROM tasks t
                 LEFT JOIN projects p
                     ON p.id = t.project_id
