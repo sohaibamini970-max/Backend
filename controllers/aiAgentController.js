@@ -2554,8 +2554,11 @@ const parseAIResponse = (response) => {
 };
 
 // Generate final response
+// Generate final response
+// Generate final response for non-data-retrieval functions
 const generateFinalResponse = async (functionName, result, user) => {
     try {
+        // For functions that modify data (create, update, delete, assign)
         const model = getModel();
         const prompt = `
         A user executed the function "${functionName}".
@@ -2569,12 +2572,12 @@ const generateFinalResponse = async (functionName, result, user) => {
 
         const aiResult = await model.generateContent(prompt);
         return aiResult.response.text().trim();
+        
     } catch (error) {
         console.error('Error generating final response:', error);
         return `Executed ${functionName}. Check the results for details.`;
     }
 };
-
 // Main handler
 exports.handleAIAgent = async (req, res) => {
     try {
@@ -4184,27 +4187,68 @@ Be concise, professional, accurate, and database-driven.
                         });
                     }
                 
-                    const finalResponse = await generateFinalResponse(
+                 // =====================================================
+// GENERATE APPROPRIATE RESPONSE BASED ON FUNCTION TYPE
+// =====================================================
 
-                        functionName,
+let finalMessage;
 
-                        executionResult,
+// For data retrieval functions, format the data directly
+if (functionName === 'getProjects') {
+    const projects = executionResult?.projects || [];
+    if (projects.length === 0) {
+        finalMessage = "No projects were found matching your criteria.";
+    } else {
+        let projectList = `📋 **${projects.length} Project(s) Found:**\n\n`;
+        projects.forEach((project, index) => {
+            const name = project.name || 'Unnamed Project';
+            const deadline = project.deadline || 'No deadline set';
+            const status = project.status || 'Unknown';
+            const priority = project.priority || 'Not set';
+            const manager = project.managerName || project.manager?.fullName || 'Unassigned';
+            
+            projectList += `${index + 1}. **${name}**\n`;
+            projectList += `   📅 Deadline: ${deadline}\n`;
+            projectList += `   📊 Status: ${status}\n`;
+            projectList += `   ⚡ Priority: ${priority}\n`;
+            projectList += `   👤 Manager: ${manager}\n\n`;
+        });
+        finalMessage = projectList.trim();
+    }
+} 
+else if (functionName === 'getTasks') {
+    const tasks = executionResult?.tasks || [];
+    if (tasks.length === 0) {
+        finalMessage = "No tasks were found matching your criteria.";
+    } else {
+        let taskList = `📋 **${tasks.length} Task(s) Found:**\n\n`;
+        tasks.forEach((task, index) => {
+            const name = task.name || task.taskName || 'Unnamed Task';
+            const dueDate = task.dueDate || task.deadline || 'No due date set';
+            const status = task.status || 'Unknown';
+            const projectName = task.projectName || task.project?.name || 'No project';
+            const assignee = task.assigneeName || task.assignee?.fullName || 'Unassigned';
+            
+            taskList += `${index + 1}. **${name}**\n`;
+            taskList += `   📅 Due Date: ${dueDate}\n`;
+            taskList += `   📊 Status: ${status}\n`;
+            taskList += `   📁 Project: ${projectName}\n`;
+            taskList += `   👤 Assignee: ${assignee}\n\n`;
+        });
+        finalMessage = taskList.trim();
+    }
+}
+// For other functions (create, update, delete, assign), use AI to generate a response
+else {
+    finalMessage = await generateFinalResponse(functionName, executionResult, user);
+}
 
-                        user
-
-                    );
-
-                    return res.status(200).json({
-
-                        success: true,
-
-                        message: finalResponse,
-
-                        data: executionResult,
-
-                        function_called: functionName
-
-                    });
+return res.status(200).json({
+    success: true,
+    message: finalMessage,
+    data: executionResult,
+    function_called: functionName
+});
 
                 } catch (error) {
                     console.error(`❌ Function execution failed: ${functionName}`, error);
