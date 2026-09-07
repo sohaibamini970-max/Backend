@@ -1622,7 +1622,7 @@ const functions = {
                         t.status,
                         t.project_id,
                         p.name AS project_name,
-                        t.assigned_to
+                        t.assigned_id
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
@@ -1651,7 +1651,7 @@ const functions = {
                         t.status,
                         t.project_id,
                         p.name AS project_name,
-                        t.assigned_to
+                        t.assigned_id
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
