@@ -1146,10 +1146,11 @@ const functions = {
             managerName
         } = params;
 
-        // handleAIAgent() passes the logged-in user directly
+        // =========================================================
+        // CURRENT LOGGED-IN USER
+        // =========================================================
         const currentUser = user;
 
-        // Normalize role to avoid case/space mismatch
         const currentRole = String(
             currentUser?.role || ""
         )
@@ -1167,9 +1168,8 @@ const functions = {
         });
 
         // =========================================================
-        // PERMISSION CHECK
-        // Executive Manager OR System Administrator can assign
-        // projects.
+        // PERMISSION
+        // Executive Manager OR System Administrator
         // =========================================================
         const canAssignProject =
             currentRole === "executive manager" ||
@@ -1184,9 +1184,12 @@ const functions = {
         }
 
         // =========================================================
-        // VALIDATE PROJECT INPUT
+        // PROJECT IDENTIFICATION
         // =========================================================
-        if (!projectId && !projectName) {
+
+        let resolvedProjectId = projectId;
+
+        if (!resolvedProjectId && !projectName) {
             return {
                 success: false,
                 message:
@@ -1194,11 +1197,7 @@ const functions = {
             };
         }
 
-        // =========================================================
-        // RESOLVE PROJECT
-        // =========================================================
-        let resolvedProjectId = projectId;
-
+        // Find project by exact name
         if (!resolvedProjectId) {
             const projectResult = await pool.query(
                 `
@@ -1222,7 +1221,6 @@ const functions = {
                 projectResult.rows.length
             );
 
-            // No project found
             if (projectResult.rows.length === 0) {
                 return {
                     success: false,
@@ -1231,7 +1229,6 @@ const functions = {
                 };
             }
 
-            // Multiple projects with same name
             if (projectResult.rows.length > 1) {
                 return {
                     success: false,
@@ -1251,9 +1248,12 @@ const functions = {
         }
 
         // =========================================================
-        // VALIDATE MANAGER INPUT
+        // MANAGER IDENTIFICATION
         // =========================================================
-        if (!managerId && !managerName) {
+
+        let resolvedManagerId = managerId;
+
+        if (!resolvedManagerId && !managerName) {
             return {
                 success: false,
                 message:
@@ -1262,10 +1262,8 @@ const functions = {
         }
 
         // =========================================================
-        // RESOLVE PROJECT MANAGER
-        // ONLY ACTIVE PROJECT MANAGERS ARE ALLOWED
+        // FIND PROJECT MANAGER BY NAME
         // =========================================================
-        let resolvedManagerId = managerId;
 
         if (!resolvedManagerId) {
             const managerResult = await pool.query(
@@ -1295,10 +1293,9 @@ const functions = {
             // =====================================================
             // NO ACTIVE PROJECT MANAGER FOUND
             // =====================================================
+
             if (managerResult.rows.length === 0) {
 
-                // Check whether the name exists under another role
-                // or inactive account. This gives a better message.
                 const userCheck = await pool.query(
                     `
                     SELECT
@@ -1342,8 +1339,9 @@ const functions = {
             }
 
             // =====================================================
-            // MULTIPLE MANAGERS WITH SAME NAME
+            // DUPLICATE MANAGER NAMES
             // =====================================================
+
             if (managerResult.rows.length > 1) {
                 return {
                     success: false,
@@ -1362,9 +1360,9 @@ const functions = {
         }
 
         // =========================================================
-        // IF MANAGER ID WAS PROVIDED DIRECTLY
-        // VERIFY THAT IT BELONGS TO AN ACTIVE PROJECT MANAGER
+        // VERIFY MANAGER ID
         // =========================================================
+
         if (resolvedManagerId) {
             const managerVerifyResult = await pool.query(
                 `
@@ -1416,11 +1414,11 @@ const functions = {
         }
 
         // =========================================================
-        // CREATE EXPRESS-LIKE REQUEST FOR EXISTING CONTROLLER
+        // EXPRESS-LIKE REQUEST
         // IMPORTANT:
-        // Do NOT modify the real req object because this function
-        // receives "user", not Express req.
+        // Do NOT modify the real user object.
         // =========================================================
+
         const controllerReq = {
             params: {
                 projectId: resolvedProjectId
@@ -1433,8 +1431,8 @@ const functions = {
 
         // =========================================================
         // MOCK EXPRESS RESPONSE
-        // This allows us to reuse projectController.assignProject()
         // =========================================================
+
         let controllerResponse;
 
         const mockRes = {
@@ -1463,8 +1461,9 @@ const functions = {
         };
 
         // =========================================================
-        // CALL EXISTING PROJECT CONTROLLER
+        // CALL REAL PROJECT CONTROLLER
         // =========================================================
+
         await projectController.assignProject(
             controllerReq,
             mockRes
@@ -1476,8 +1475,9 @@ const functions = {
         );
 
         // =========================================================
-        // VALIDATE CONTROLLER RESPONSE
+        // VALIDATE RESPONSE
         // =========================================================
+
         if (
             !controllerResponse ||
             !controllerResponse.data
@@ -1490,8 +1490,9 @@ const functions = {
         }
 
         // =========================================================
-        // RETURN CONTROLLER RESULT TO AI AGENT
+        // RETURN RESULT
         // =========================================================
+
         return controllerResponse.data;
 
     } catch (error) {
