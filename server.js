@@ -22,18 +22,37 @@ const app = express();
 // ============================================================
 
 // Allow all origins (for development and Vercel)
+const allowedOrigins = [
+    "https://frontend-flame-psi-krqyinvisb.vercel.app",
+    "http://localhost:3000"
+];
+
 const corsOptions = {
-    origin: '*', // Allow all origins
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    origin: function (origin, callback) {
+        // Allow requests without an origin (Postman, server-to-server, etc.)
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+
+        return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Accept"
+    ],
     credentials: true,
-    optionsSuccessStatus: 200
+    optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
-
-// Handle preflight requests explicitly
-app.options('*', cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // Body parsers with increased limits
 app.use(express.json({ limit: '10mb' }));
