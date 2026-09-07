@@ -1278,7 +1278,7 @@ const functions = {
                     is_active
                 FROM users
                 WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
-                  AND LOWER(TRIM(role)) = LOWER(TRIM('Project Manager'))
+                  AND role::text = 'Project Manager'
                   AND is_active = TRUE
                 ORDER BY full_name ASC
                 `,
