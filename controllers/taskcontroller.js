@@ -1105,5 +1105,5 @@ module.exports = {
     getMyTasks,
     getMyProjects,
     getTaskStats,
-    getTask
+    getTasks
 };
