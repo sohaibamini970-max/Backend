@@ -1510,7 +1510,7 @@ const functions = {
     }
 },
 
-    assignTask: async (params, user) => {
+  assignTask: async (params, user) => {
     try {
         const {
             taskId,
@@ -1582,7 +1582,7 @@ const functions = {
         }
 
         // =====================================================
-        // RESOLVE TASK
+        // RESOLVE TASK - IMPROVED CASE-INSENSITIVE MATCHING
         // =====================================================
 
         let resolvedTaskId = taskId;
@@ -1609,12 +1609,11 @@ const functions = {
             let taskValues;
 
             // -------------------------------------------------
-            // Best case:
-            // task name + project name
+            // IMPROVED: Case-insensitive matching with ILIKE or LOWER
             // -------------------------------------------------
 
             if (projectName) {
-
+                // Use LOWER for PostgreSQL case-insensitive matching
                 taskQuery = `
                     SELECT
                         t.id,
@@ -1626,10 +1625,8 @@ const functions = {
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
-                    WHERE LOWER(TRIM(t.name)) =
-                          LOWER(TRIM($1))
-                      AND LOWER(TRIM(p.name)) =
-                          LOWER(TRIM($2))
+                    WHERE LOWER(TRIM(t.name)) = LOWER(TRIM($1))
+                      AND LOWER(TRIM(p.name)) = LOWER(TRIM($2))
                     ORDER BY t.name ASC
                 `;
 
@@ -1640,10 +1637,6 @@ const functions = {
 
             } else if (projectId) {
 
-                // -------------------------------------------------
-                // task name + project ID
-                // -------------------------------------------------
-
                 taskQuery = `
                     SELECT
                         t.id,
@@ -1655,8 +1648,7 @@ const functions = {
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
-                    WHERE LOWER(TRIM(t.name)) =
-                          LOWER(TRIM($1))
+                    WHERE LOWER(TRIM(t.name)) = LOWER(TRIM($1))
                       AND t.project_id = $2
                     ORDER BY t.name ASC
                 `;
@@ -1668,11 +1660,7 @@ const functions = {
 
             } else {
 
-                // -------------------------------------------------
-                // No project supplied.
-                // Search all projects.
-                // -------------------------------------------------
-
+                // No project supplied - search all projects
                 taskQuery = `
                     SELECT
                         t.id,
@@ -1684,8 +1672,7 @@ const functions = {
                     FROM tasks t
                     LEFT JOIN projects p
                         ON p.id = t.project_id
-                    WHERE LOWER(TRIM(t.name)) =
-                          LOWER(TRIM($1))
+                    WHERE LOWER(TRIM(t.name)) = LOWER(TRIM($1))
                     ORDER BY p.name ASC, t.name ASC
                 `;
 
@@ -1694,13 +1681,15 @@ const functions = {
                 ];
             }
 
-            const taskResult = await pool.query(
+            console.log(`🔎 Task lookup: "${taskName}" in project: "${projectName || 'any'}"`);
+            
+            let taskResult = await pool.query(
                 taskQuery,
                 taskValues
             );
 
             console.log(
-                "🔎 Task lookup:",
+                "🔎 Task lookup results:",
                 {
                     taskName,
                     projectName,
@@ -1709,12 +1698,95 @@ const functions = {
                 }
             );
 
+            // If no tasks found with exact case-insensitive match, try a more flexible approach
+            if (taskResult.rows.length === 0 && projectName) {
+                console.log(`🔎 No exact match found, trying more flexible search for task "${taskName}"...`);
+                
+                // Try partial match with ILIKE
+                const flexibleQuery = `
+                    SELECT
+                        t.id,
+                        t.name,
+                        t.status,
+                        t.project_id,
+                        p.name AS project_name,
+                        t.assignee_id
+                    FROM tasks t
+                    LEFT JOIN projects p
+                        ON p.id = t.project_id
+                    WHERE LOWER(TRIM(t.name)) ILIKE $1
+                      AND LOWER(TRIM(p.name)) = LOWER(TRIM($2))
+                    ORDER BY t.name ASC
+                `;
+
+                const flexibleResult = await pool.query(
+                    flexibleQuery,
+                    [`%${taskName.toLowerCase().trim()}%`, projectName]
+                );
+
+                if (flexibleResult.rows.length > 0) {
+                    console.log(`✅ Found ${flexibleResult.rows.length} task(s) with flexible search`);
+                    // Use the flexible results
+                    taskResult = flexibleResult;
+                }
+            }
+
+            // If still no results, try searching without project filter
+            if (taskResult.rows.length === 0 && projectName) {
+                console.log(`🔎 No task found with project filter, searching all projects...`);
+                
+                const allProjectsQuery = `
+                    SELECT
+                        t.id,
+                        t.name,
+                        t.status,
+                        t.project_id,
+                        p.name AS project_name,
+                        t.assignee_id
+                    FROM tasks t
+                    LEFT JOIN projects p
+                        ON p.id = t.project_id
+                    WHERE LOWER(TRIM(t.name)) ILIKE $1
+                    ORDER BY p.name ASC, t.name ASC
+                `;
+
+                const allProjectsResult = await pool.query(
+                    allProjectsQuery,
+                    [`%${taskName.toLowerCase().trim()}%`]
+                );
+
+                if (allProjectsResult.rows.length > 0) {
+                    console.log(`✅ Found ${allProjectsResult.rows.length} task(s) in other projects`);
+                    taskResult = allProjectsResult;
+                    
+                    // If multiple tasks found across projects, ask user to specify project
+                    if (taskResult.rows.length > 1) {
+                        return {
+                            success: false,
+                            requiresTaskSelection: true,
+                            multipleTasks: true,
+                            taskName,
+                            projectName: projectName || null,
+                            tasks: taskResult.rows.map(task => ({
+                                id: task.id,
+                                name: task.name,
+                                projectId: task.project_id,
+                                projectName: task.project_name,
+                                status: task.status,
+                                assignedTo: task.assignee_id
+                            })),
+                            error:
+                                `Found ${taskResult.rows.length} tasks named "${taskName}" across different projects. Please provide the project name or task ID.`
+                        };
+                    }
+                }
+            }
+
             // -------------------------------------------------
             // TASK NOT FOUND
             // -------------------------------------------------
 
             if (taskResult.rows.length === 0) {
-
                 return {
                     success: false,
                     requiresTaskSelection: true,
@@ -1722,8 +1794,8 @@ const functions = {
                     projectName: projectName || null,
                     error:
                         projectName
-                            ? `No task named "${taskName}" was found in project "${projectName}".`
-                            : `No task named "${taskName}" was found.`
+                            ? `No task named "${taskName}" was found in project "${projectName}". Please check the task name and project name.`
+                            : `No task named "${taskName}" was found. Please check the spelling and try again.`
                 };
             }
 
@@ -1732,14 +1804,12 @@ const functions = {
             // -------------------------------------------------
 
             if (taskResult.rows.length > 1) {
-
                 return {
                     success: false,
                     requiresTaskSelection: true,
                     multipleTasks: true,
                     taskName,
                     projectName: projectName || null,
-
                     tasks: taskResult.rows.map(task => ({
                         id: task.id,
                         name: task.name,
@@ -1748,7 +1818,6 @@ const functions = {
                         status: task.status,
                         assignedTo: task.assignee_id
                     })),
-
                     error:
                         projectName
                             ? `Multiple tasks named "${taskName}" were found in project "${projectName}". Please provide the task ID.`
@@ -1761,17 +1830,10 @@ const functions = {
             // -------------------------------------------------
 
             const foundTask = taskResult.rows[0];
-
             resolvedTaskId = foundTask.id;
-
-            resolvedTaskName =
-                foundTask.name || taskName;
-
-            resolvedProjectId =
-                foundTask.project_id || projectId;
-
-            resolvedProjectName =
-                foundTask.project_name || projectName;
+            resolvedTaskName = foundTask.name || taskName;
+            resolvedProjectId = foundTask.project_id || projectId;
+            resolvedProjectName = foundTask.project_name || projectName;
         }
 
         // =====================================================
@@ -1822,19 +1884,29 @@ const functions = {
         }
 
         // =====================================================
-        // RESOLVE MEMBER
+        // RESOLVE MEMBER - IMPROVED CASE-INSENSITIVE MATCHING
         // =====================================================
 
         let resolvedAssigneeId = assigneeId;
         let resolvedAssigneeName = assigneeName;
 
         // -----------------------------------------------------
-        // Find Member by name
+        // Find Member by name (case-insensitive)
         // -----------------------------------------------------
 
         if (!resolvedAssigneeId) {
 
-            const memberResult = await pool.query(
+            if (!assigneeName) {
+                return {
+                    success: false,
+                    requiresAssigneeSelection: true,
+                    error:
+                        "Please provide the Member name."
+                };
+            }
+
+            // First try exact case-insensitive match
+            let memberResult = await pool.query(
                 `
                 SELECT
                     id,
@@ -1843,8 +1915,7 @@ const functions = {
                     role,
                     is_active
                 FROM users
-                WHERE LOWER(TRIM(full_name)) =
-                      LOWER(TRIM($1))
+                WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
                   AND role::text = 'Member'
                   AND is_active = TRUE
                 ORDER BY full_name ASC
@@ -1853,19 +1924,17 @@ const functions = {
             );
 
             console.log(
-                "🔎 Member lookup:",
+                "🔎 Member lookup (exact):",
                 assigneeName,
                 "matches:",
                 memberResult.rows.length
             );
 
-            // -------------------------------------------------
-            // MEMBER NOT FOUND
-            // -------------------------------------------------
-
+            // If no exact match, try partial match with ILIKE
             if (memberResult.rows.length === 0) {
-
-                const userCheck = await pool.query(
+                console.log(`🔎 No exact match found for "${assigneeName}", trying flexible search...`);
+                
+                memberResult = await pool.query(
                     `
                     SELECT
                         id,
@@ -1874,40 +1943,85 @@ const functions = {
                         role,
                         is_active
                     FROM users
-                    WHERE LOWER(TRIM(full_name)) =
-                          LOWER(TRIM($1))
+                    WHERE LOWER(TRIM(full_name)) ILIKE $1
+                      AND role::text = 'Member'
+                      AND is_active = TRUE
+                    ORDER BY full_name ASC
+                    `,
+                    [`%${assigneeName.toLowerCase().trim()}%`]
+                );
+                
+                console.log(
+                    "🔎 Member lookup (flexible):",
+                    assigneeName,
+                    "matches:",
+                    memberResult.rows.length
+                );
+            }
+
+            // If still no match, try checking if user exists but has different role
+            if (memberResult.rows.length === 0) {
+                // First try exact match for user check
+                let userCheck = await pool.query(
+                    `
+                    SELECT
+                        id,
+                        full_name,
+                        email,
+                        role,
+                        is_active
+                    FROM users
+                    WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
                     ORDER BY full_name ASC
                     `,
                     [assigneeName]
                 );
 
                 console.log(
-                    "🔎 Member diagnostic lookup:",
+                    "🔎 User diagnostic lookup (exact):",
                     userCheck.rows
                 );
 
+                // If no exact match, try flexible user check
+                if (userCheck.rows.length === 0) {
+                    console.log(`🔎 No exact user match found, trying flexible user search...`);
+                    
+                    userCheck = await pool.query(
+                        `
+                        SELECT
+                            id,
+                            full_name,
+                            email,
+                            role,
+                            is_active
+                        FROM users
+                        WHERE LOWER(TRIM(full_name)) ILIKE $1
+                        ORDER BY full_name ASC
+                        `,
+                        [`%${assigneeName.toLowerCase().trim()}%`]
+                    );
+                    
+                    console.log(
+                        "🔎 User diagnostic lookup (flexible):",
+                        userCheck.rows
+                    );
+                }
+
                 if (userCheck.rows.length > 0) {
+                    // Show all users with that name and their roles
                     return {
                         success: false,
                         requiresAssigneeSelection: true,
                         assigneeName,
-
-                        users: userCheck.rows.map(
-                            existingUser => ({
-                                id: existingUser.id,
-                                fullName:
-                                    existingUser.full_name,
-                                email:
-                                    existingUser.email,
-                                role:
-                                    existingUser.role,
-                                isActive:
-                                    existingUser.is_active
-                            })
-                        ),
-
+                        users: userCheck.rows.map(existingUser => ({
+                            id: existingUser.id,
+                            fullName: existingUser.full_name,
+                            email: existingUser.email,
+                            role: existingUser.role,
+                            isActive: existingUser.is_active
+                        })),
                         error:
-                            `"${assigneeName}" exists, but is not an active Member.`
+                            `Found ${userCheck.rows.length} user(s) with name similar to "${assigneeName}", but none are active Members. Please check the name or role, or provide a Member ID.`
                     };
                 }
 
@@ -1915,53 +2029,33 @@ const functions = {
                     success: false,
                     requiresAssigneeSelection: true,
                     assigneeName,
-
                     error:
-                        `No active Member named "${assigneeName}" was found.`
+                        `No user named "${assigneeName}" was found. Please check the spelling and try again.`
                 };
             }
 
-            // -------------------------------------------------
-            // DUPLICATE MEMBER NAME
-            // -------------------------------------------------
-
+            // If multiple matches, ask for clarification
             if (memberResult.rows.length > 1) {
-
                 return {
                     success: false,
                     requiresAssigneeSelection: true,
                     multipleAssignees: true,
                     assigneeName,
-
-                    members:
-                        memberResult.rows.map(member => ({
-                            id: member.id,
-                            fullName:
-                                member.full_name,
-                            email:
-                                member.email,
-                            role:
-                                member.role
-                        })),
-
+                    members: memberResult.rows.map(member => ({
+                        id: member.id,
+                        fullName: member.full_name,
+                        email: member.email,
+                        role: member.role
+                    })),
                     error:
                         `Multiple active Members named "${assigneeName}" were found. Please provide the member ID.`
                 };
             }
 
-            // -------------------------------------------------
-            // SINGLE MEMBER FOUND
-            // -------------------------------------------------
-
-            const foundMember =
-                memberResult.rows[0];
-
-            resolvedAssigneeId =
-                foundMember.id;
-
-            resolvedAssigneeName =
-                foundMember.full_name ||
-                assigneeName;
+            // Single match found
+            const foundMember = memberResult.rows[0];
+            resolvedAssigneeId = foundMember.id;
+            resolvedAssigneeName = foundMember.full_name || assigneeName;
         }
 
         // =====================================================
