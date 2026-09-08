@@ -5251,29 +5251,32 @@ const finalMessage =
 // FINAL API RESPONSE
 // =========================================================
 
+// =========================================================
+// FINAL API RESPONSE
+// =========================================================
+
 return res.status(200).json({
-
     success: execution.success,
-
     message: finalMessage,
-
     data: execution.results,
-
     function_called:
         execution.results.length === 1
             ? execution.results[0].function
             : null,
-
     actions: execution.results.map(
         item => ({
             function: item.function,
             success: item.success,
             result: item.result || null,
             error: item.error || null,
-            permissionDenied:
-                item.permissionDenied || false
-           })
-         )
-      });
-    }
+            permissionDenied: item.permissionDenied || false
+        })
+    )
+});
+} catch (error) {
+    console.error('❌ AI Agent error:', error);
+    return res.status(500).json({
+        success: false,
+        error: error.message || 'Internal server error'
+    });
 }
