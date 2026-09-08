@@ -2527,57 +2527,935 @@ const functions = {
     },
 };
 
-// Parse AI response for function calls
-const parseAIResponse = (response) => {
-    console.log('🔍 Parsing AI response:', response?.substring(0, 200) + '...');
+// =========================================================
+// MULTI-ACTION AI RESPONSE PARSER
+// =========================================================
 
-    const functionRegex = /\[FUNCTION:(\w+)\]({[^}]*})/g;
-    const match = functionRegex.exec(response);
+const extractJsonObject = (text) => {
+    if (!text || typeof text !== "string") {
+        return null;
+    }
 
-    if (match) {
-        try {
-            const functionName = match[1];
-            const arguments = JSON.parse(match[2]);
-            console.log(`✅ Parsed function: ${functionName}`, arguments);
-            return {
-                function_call: { name: functionName, arguments: arguments },
-                response: response.replace(match[0], '').trim()
-            };
-        } catch (error) {
-            console.error('❌ Failed to parse function call:', error);
-            console.error('Raw match:', match[0]);
+    const start = text.indexOf("{");
+
+    if (start === -1) {
+        return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < text.length; i++) {
+        const char = text[i];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+
+        if (char === "\\") {
+            escaped = true;
+            continue;
+        }
+
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) {
+            continue;
+        }
+
+        if (char === "{") {
+            depth++;
+        } else if (char === "}") {
+            depth--;
+
+            if (depth === 0) {
+                return text.substring(start, i + 1);
+            }
         }
     }
 
-    console.log('ℹ️ No function call found in response');
-    return { function_call: null, response };
+    return null;
 };
 
+
+// =========================================================
+// PARSE MULTIPLE AI ACTIONS
+// =========================================================
+
+const parseAIResponse = (response) => {
+
+    console.log(
+        "🔍 Parsing AI response:",
+        response?.substring(0, 500)
+    );
+
+    if (!response) {
+        return {
+            actions: [],
+            response: ""
+        };
+    }
+
+    // ---------------------------------------------------------
+    // NEW FORMAT
+    //
+    // {
+    //   "actions": [
+    //      {
+    //        "function": "createProject",
+    //        "arguments": {}
+    //      }
+    //   ]
+    // }
+    // ---------------------------------------------------------
+
+    const jsonText = extractJsonObject(response);
+
+    if (jsonText) {
+
+        try {
+
+            const parsed = JSON.parse(jsonText);
+
+            if (Array.isArray(parsed.actions)) {
+
+                const actions = parsed.actions
+                    .filter(action =>
+                        action &&
+                        typeof action.function === "string"
+                    )
+                    .map(action => ({
+                        function: action.function.trim(),
+                        arguments:
+                            action.arguments &&
+                            typeof action.arguments === "object"
+                                ? action.arguments
+                                : {}
+                    }));
+
+                console.log(
+                    `✅ Parsed ${actions.length} AI action(s)`
+                );
+
+                return {
+                    actions,
+                    response: ""
+                };
+            }
+
+        } catch (error) {
+
+            console.error(
+                "❌ Failed to parse JSON action plan:",
+                error
+            );
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // BACKWARD COMPATIBILITY
+    //
+    // Supports:
+    //
+    // [FUNCTION:createProject]{...}
+    // [FUNCTION:createProject]{...}
+    //
+    // ---------------------------------------------------------
+
+    const actions = [];
+
+    const functionRegex =
+        /\[FUNCTION:(\w+)\]\s*(\{(?:[^{}]|"(?:\\.|[^"\\])*")*\})/g;
+
+    let match;
+
+    while ((match = functionRegex.exec(response)) !== null) {
+
+        try {
+
+            actions.push({
+                function: match[1],
+                arguments: JSON.parse(match[2])
+            });
+
+        } catch (error) {
+
+            console.error(
+                "❌ Failed to parse legacy function:",
+                match[0]
+            );
+        }
+    }
+
+    if (actions.length > 0) {
+
+        console.log(
+            `✅ Parsed ${actions.length} legacy action(s)`
+        );
+
+        return {
+            actions,
+            response: response
+                .replace(functionRegex, "")
+                .trim()
+        };
+    }
+
+
+    console.log("ℹ️ No function/action detected");
+
+    return {
+        actions: [],
+        response
+    };
+};
 // Generate final response
 // Generate final response
 // Generate final response for non-data-retrieval functions
-const generateFinalResponse = async (functionName, result, user) => {
-    try {
-        // For functions that modify data (create, update, delete, assign)
-        const model = getModel();
-        const prompt = `
-        A user executed the function "${functionName}".
-        Result: ${JSON.stringify(result, null, 2)}
-        
-        Generate a brief, professional response summarizing what happened.
-        If successful, confirm with details.
-        If error, explain clearly.
-        Keep it to 2-3 sentences.
-        `;
+// =========================================================
+// HUMAN-FRIENDLY ACTION RESPONSE
+// =========================================================
 
-        const aiResult = await model.generateContent(prompt);
-        return aiResult.response.text().trim();
-        
-    } catch (error) {
-        console.error('Error generating final response:', error);
-        return `Executed ${functionName}. Check the results for details.`;
+const buildActionMessage = (item) => {
+
+    const functionName = item.function;
+    const result = item.result || {};
+    const params = item.arguments || {};
+
+
+    // ---------------------------------------------------------
+    // PERMISSION DENIED
+    // ---------------------------------------------------------
+
+    if (item.permissionDenied) {
+        return `❌ ${item.error}`;
     }
+
+
+    // ---------------------------------------------------------
+    // FAILED
+    // ---------------------------------------------------------
+
+    if (!item.success) {
+
+        const error =
+            result?.error ||
+            result?.message ||
+            item.error ||
+            "The operation could not be completed.";
+
+        return `❌ ${error}`;
+    }
+
+
+    // ---------------------------------------------------------
+    // CREATE PROJECT
+    // ---------------------------------------------------------
+
+    if (functionName === "createProject") {
+
+        const projectName =
+            result?.project?.name ||
+            result?.name ||
+            params.name ||
+            "the project";
+
+        return `✅ Project "${projectName}" was created successfully.`;
+    }
+
+
+    // ---------------------------------------------------------
+    // CREATE TASK
+    // ---------------------------------------------------------
+
+    if (functionName === "createTask") {
+
+        const taskName =
+            result?.task?.name ||
+            result?.name ||
+            params.name ||
+            "the task";
+
+        const projectName =
+            result?.task?.projectName ||
+            result?.projectName ||
+            params.projectName;
+
+        if (projectName) {
+
+            return (
+                `✅ Task "${taskName}" was created successfully ` +
+                `under project "${projectName}".`
+            );
+        }
+
+        return (
+            `✅ Task "${taskName}" was created successfully.`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // ASSIGN PROJECT
+    // ---------------------------------------------------------
+
+    if (functionName === "assignProject") {
+
+        const projectName =
+            result?.projectName ||
+            params.projectName ||
+            "the project";
+
+        const managerName =
+            result?.managerName ||
+            params.managerName ||
+            "the Project Manager";
+
+        return (
+            `✅ Project "${projectName}" was successfully ` +
+            `assigned to Project Manager "${managerName}".`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // ASSIGN TASK
+    // ---------------------------------------------------------
+
+    if (functionName === "assignTask") {
+
+        const taskName =
+            result?.taskName ||
+            params.taskName ||
+            "the task";
+
+        const assigneeName =
+            result?.assigneeName ||
+            params.assigneeName ||
+            "the Member";
+
+        return (
+            `✅ Task "${taskName}" was successfully ` +
+            `assigned to Member "${assigneeName}".`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // UPDATE TASK STATUS
+    // ---------------------------------------------------------
+
+    if (functionName === "updateTaskStatus") {
+
+        const taskName =
+            result?.taskName ||
+            params.taskName ||
+            params.taskId ||
+            "the task";
+
+        const status =
+            result?.status ||
+            params.status ||
+            "the requested status";
+
+        return (
+            `✅ Task "${taskName}" status was successfully ` +
+            `updated to "${status}".`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // DELETE TASK
+    // ---------------------------------------------------------
+
+    if (functionName === "deleteTask") {
+
+        const taskName =
+            result?.taskName ||
+            params.taskName ||
+            params.taskId ||
+            "the task";
+
+        return (
+            `✅ Task "${taskName}" was successfully deleted.`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // SUBMIT WORK
+    // ---------------------------------------------------------
+
+    if (functionName === "submitWork") {
+
+        const taskName =
+            result?.taskName ||
+            params.taskName ||
+            params.taskId ||
+            "the task";
+
+        return (
+            `✅ Your work submission for "${taskName}" ` +
+            `was submitted successfully.`
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // FALLBACK
+    // ---------------------------------------------------------
+
+    return "✅ The requested operation was completed successfully.";
 };
+
+// =========================================================
+// GENERATE FINAL MULTI-ACTION RESPONSE
+// =========================================================
+
+const generateMultiActionResponse = async (
+    results,
+    user
+) => {
+
+    if (!results || results.length === 0) {
+        return "I couldn't identify an operation to perform.";
+    }
+
+
+    const messages =
+        results.map(buildActionMessage);
+
+
+    // ---------------------------------------------------------
+    // SINGLE ACTION
+    // ---------------------------------------------------------
+
+    if (messages.length === 1) {
+        return messages[0];
+    }
+
+
+    // ---------------------------------------------------------
+    // MULTIPLE ACTIONS
+    // ---------------------------------------------------------
+
+    const successful =
+        results.filter(
+            item => item.success
+        ).length;
+
+    const failed =
+        results.length - successful;
+
+
+    let response =
+        `I processed ${results.length} requested operations.\n\n`;
+
+
+    messages.forEach(
+        (message, index) => {
+
+            response +=
+                `${index + 1}. ${message}\n`;
+
+        }
+    );
+
+
+    if (failed === 0) {
+
+        response +=
+            `\n✅ All ${successful} operations were completed successfully.`;
+
+    } else if (successful > 0) {
+
+        response +=
+            `\n⚠️ ${successful} operation(s) succeeded and ` +
+            `${failed} operation(s) could not be completed.`;
+
+    } else {
+
+        response +=
+            `\n❌ None of the requested operations were completed.`;
+    }
+
+
+    return response.trim();
+};
+
+
+// =========================================================
+
+// AI AGENT ROLE PERMISSIONS
+
+// =========================================================
+
+const ACTION_PERMISSIONS = {
+
+    createProject: [
+        "Executive Manager",
+        "System Administrator"
+    ],
+
+    createTask: [
+        "Project Manager"
+    ],
+
+    assignProject: [
+        "Executive Manager",
+        "System Administrator"
+    ],
+
+    assignTask: [
+        "Project Manager",
+    ],
+
+    updateTaskStatus: [
+        "Project Manager",
+        "Executive Manager",
+        "System Administrator"
+    ],
+
+    deleteTask: [
+        "Project Manager",
+        "Executive Manager",
+        "System Administrator"
+    ],
+
+    submitWork: [
+        "Member"
+    ]
+
+};
+
+// =========================================================
+
+// CHECK WHETHER USER CAN EXECUTE ACTION
+
+// =========================================================
+
+const checkActionPermission = (functionName, user) => {
+
+    const allowedRoles =
+
+        ACTION_PERMISSIONS[functionName];
+
+    // Retrieval/helper functions do not need
+
+    // mutation permission checking here.
+
+    if (!allowedRoles) {
+
+        return {
+
+            allowed: true
+
+        };
+
+    }
+
+    const userRole = String(
+
+        user?.role || ""
+
+    ).trim();
+
+    if (!allowedRoles.includes(userRole)) {
+
+        const responsibilityMap = {
+
+            createProject:
+
+                "Project creation is the responsibility of the Executive Manager or System Administrator.",
+
+            createTask:
+
+                "Task creation is the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+
+            assignProject:
+
+                "Project assignment is the responsibility of the Executive Manager or System Administrator.",
+
+            assignTask:
+
+                "Task assignment is the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+
+            updateTaskStatus:
+
+                "Task status updates are the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+
+            deleteTask:
+
+                "Task deletion is the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+
+            submitWork:
+
+                "Work submission is the responsibility of the Member."
+
+        };
+
+        return {
+
+            allowed: false,
+
+            message:
+
+                `You are not eligible to perform this task. ` +
+
+                `${responsibilityMap[functionName] || "You do not have permission for this action."}`
+
+        };
+
+    }
+
+    return {
+
+        allowed: true
+
+    };
+
+};
+
+// =========================================================
+
+// EXECUTE ONE AI ACTION SAFELY
+
+// =========================================================
+
+const executeAIAction = async (action, user, index) => {
+
+    const functionName = action?.function;
+
+    const params = action?.arguments || {};
+
+    console.log(
+
+        `⚡ Action ${index + 1}: ${functionName}`,
+
+        params
+
+    );
+
+    // ---------------------------------------------------------
+
+    // INVALID FUNCTION
+
+    // ---------------------------------------------------------
+
+    if (!functionName || !functions[functionName]) {
+
+        return {
+
+            index,
+
+            function: functionName || "unknown",
+
+            success: false,
+
+            error:
+
+                `The requested operation "${functionName || "unknown"}" is not available.`
+
+        };
+
+    }
+
+    // ---------------------------------------------------------
+
+    // ROLE CHECK
+
+    // ---------------------------------------------------------
+
+    const permission =
+
+        checkActionPermission(
+
+            functionName,
+
+            user
+
+        );
+
+    if (!permission.allowed) {
+
+        console.log(
+
+            `🚫 Permission denied: ${functionName}`
+
+        );
+
+        return {
+
+            index,
+
+            function: functionName,
+
+            arguments: params,
+
+            success: false,
+
+            permissionDenied: true,
+
+            error: permission.message
+
+        };
+
+    }
+
+    // ---------------------------------------------------------
+
+    // EXECUTE BACKEND FUNCTION
+
+    // ---------------------------------------------------------
+
+    try {
+
+        const result =
+
+            await functions[functionName](
+
+                params,
+
+                user
+
+            );
+
+        const success =
+
+            result?.success !== false;
+
+        console.log(
+
+            `✅ Action ${index + 1} completed:`,
+
+            functionName,
+
+            result
+
+        );
+
+        return {
+
+            index,
+
+            function: functionName,
+
+            arguments: params,
+
+            success,
+
+            result
+
+        };
+
+    } catch (error) {
+
+        console.error(
+
+            `❌ Action ${index + 1} failed:`,
+
+            functionName,
+
+            error
+
+        );
+
+        return {
+
+            index,
+
+            function: functionName,
+
+            arguments: params,
+
+            success: false,
+
+            error:
+
+                error.message ||
+
+                "Operation failed."
+
+        };
+
+    }
+
+};
+
+
+
+// =========================================================
+
+// CHECK WHETHER ACTIONS CAN RUN IN PARALLEL
+
+// =========================================================
+
+const isIndependentAction = (action, allActions) => {
+
+    const functionName = action?.function;
+
+    /*
+
+     * Creation actions are normally independent
+
+     * unless another action explicitly refers to
+
+     * something being created in this same request.
+
+     */
+
+    if (
+
+        functionName === "createProject" ||
+
+        functionName === "createTask"
+
+    ) {
+
+        return true;
+
+    }
+
+    return true;
+
+};
+
+// =========================================================
+
+// EXECUTE MULTIPLE ACTIONS
+
+// =========================================================
+
+const executeAIActions = async (actions, user) => {
+
+    if (!Array.isArray(actions) || actions.length === 0) {
+
+        return {
+
+            results: [],
+
+            success: true
+
+        };
+
+    }
+
+    console.log(
+
+        `🚀 AI received ${actions.length} action(s)`
+
+    );
+
+    /*
+
+     * For the current system, backend functions resolve
+
+     * names such as projectName, taskName and assigneeName.
+
+     *
+
+     * Therefore independent operations can be executed
+
+     * concurrently.
+
+     *
+
+     * Maximum concurrency = 5 to avoid creating too many
+
+     * PostgreSQL connections at once.
+
+     */
+
+    const MAX_CONCURRENT = 5;
+
+    const results = new Array(actions.length);
+
+    for (
+
+        let start = 0;
+
+        start < actions.length;
+
+        start += MAX_CONCURRENT
+
+    ) {
+
+        const batch =
+
+            actions.slice(
+
+                start,
+
+                start + MAX_CONCURRENT
+
+            );
+
+        const batchResults =
+
+            await Promise.all(
+
+                batch.map(
+
+                    (action, batchIndex) =>
+
+                        executeAIAction(
+
+                            action,
+
+                            user,
+
+                            start + batchIndex
+
+                        )
+
+                )
+
+            );
+
+        batchResults.forEach(
+
+            (result, batchIndex) => {
+
+                results[
+
+                    start + batchIndex
+
+                ] = result;
+
+            }
+
+        );
+
+    }
+
+    const success =
+
+        results.length > 0 &&
+
+        results.every(
+
+            result => result.success === true
+
+        );
+
+    return {
+
+        results,
+
+        success
+
+    };
+
+};
+
+
 // Main handler
 exports.handleAIAgent = async (req, res) => {
     try {
@@ -3765,6 +4643,84 @@ Do not ask for description.
 
 Do not ask for priority because priority defaults to Medium.
 
+// =========================================================
+// AI ACTION PLAN FORMAT
+// =========================================================
+
+When the user requests one or more operations,
+return an ACTION PLAN.
+
+The format MUST be:
+
+{
+  "actions": [
+    {
+      "function": "functionName",
+      "arguments": {
+        "parameter": "value"
+      }
+    }
+  ]
+}
+
+IMPORTANT:
+
+- Always use an "actions" array.
+- One user request may contain multiple actions.
+- Create one action object for EACH requested operation.
+- Never combine multiple operations into one action.
+- Preserve the order requested by the user.
+- Do not include explanations around the JSON.
+- Do not use Markdown.
+- Do not use code fences.
+- Use valid JSON.
+- Never invent IDs.
+- Never invent dates.
+- Never invent names.
+- Never invent database records.
+- Never invent descriptions.
+- Never invent task information.
+- Never invent project information.
+
+Example:
+
+User:
+Create two projects called AI Chatbot and Employee Portal.
+
+Return:
+
+{
+  "actions": [
+    {
+      "function": "createProject",
+      "arguments": {
+        "name": "AI Chatbot",
+        "domain": "Software Development",
+        "startDate": "2026-09-10",
+        "deadline": "2026-09-30",
+        "priority": "Medium"
+      }
+    },
+    {
+      "function": "createProject",
+      "arguments": {
+        "name": "Employee Portal",
+        "domain": "Software Development",
+        "startDate": "2026-09-10",
+        "deadline": "2026-09-30",
+        "priority": "Medium"
+      }
+    }
+  ]
+}
+
+IMPORTANT:
+
+If a request contains multiple independent operations,
+create multiple action objects.
+
+Never execute only the first requested operation.
+
 =========================================================
 DESCRIPTION RULES
 =========================================================
@@ -3977,311 +4933,345 @@ Be concise, professional, accurate, and database-driven.
         console.log('📥 Gemini response received');
 
         // Parse for function calls
-        const parsed = parseAIResponse(aiResponse);
+       // =========================================================
+// PARSE AI ACTION PLAN
+// =========================================================
 
-        if (parsed.function_call) {
-            const functionName = parsed.function_call.name;
-            const params = parsed.function_call.arguments;
-            console.log(`⚡ Executing function: ${functionName}`, params);
+const parsed =
+    parseAIResponse(aiResponse);
 
-            if (functions[functionName]) {
-                try {
-                    const executionResult = await functions[functionName](params, user);
-                    console.log(`✅ Function ${functionName} executed`, executionResult);
+const actions =
+    parsed.actions || [];
 
-                    // const finalResponse = await generateFinalResponse(functionName, executionResult, user);
 
-                    // return res.status(200).json({
-                    //     success: true,
-                    //     message: finalResponse,
-                    //     data: executionResult,
-                    //     function_called: functionName
-                    // });
+// =========================================================
+// NO ACTION
+// =========================================================
 
-                    // =====================================================
-                    // PROJECT SELECTION
-                    // =====================================================
+if (actions.length === 0) {
 
-                    if (executionResult?.requiresProjectSelection) {
+    console.log(
+        "ℹ️ No executable action detected"
+    );
 
-                        if (executionResult.multipleProjects) {
+    return res.status(200).json({
 
-                            const projectList =
-                                (executionResult.projects || [])
-                                    .map((project, index) =>
-                                        `${index + 1}. ${project.name} — ID: ${project.id}`
-                                    )
-                                    .join("\n");
+        success: true,
 
-                            return res.status(200).json({
+        message:
+            parsed.response ||
+            aiResponse,
 
-                                success: false,
+        data: null,
 
-                                requiresProjectSelection: true,
+        function_called: null,
 
-                                message:
-                                    `I found multiple projects named "${executionResult.projectName}". ` +
-                                    `Please provide the project ID you want to use.\n\n${projectList}`,
-
-                                data: executionResult,
-
-                                function_called: functionName
-                            });
-                        }
-
-                        return res.status(200).json({
-
-                            success: false,
-
-                            requiresProjectSelection: true,
-
-                            message: executionResult.error,
-
-                            data: executionResult,
-
-                            function_called: functionName
-                        });
-                    }
-
-
-                    // =====================================================
-                    // MANAGER SELECTION
-                    // =====================================================
-
-                    if (executionResult?.requiresManagerSelection) {
-
-                        if (executionResult.multipleManagers) {
-
-                            const managerList =
-                                (executionResult.managers || [])
-                                    .map((manager, index) =>
-                                        `${index + 1}. ${manager.fullName} — ID: ${manager.id}`
-                                    )
-                                    .join("\n");
-
-                            return res.status(200).json({
-
-                                success: false,
-
-                                requiresManagerSelection: true,
-
-                                message:
-                                    `I found multiple Project Managers named "${executionResult.managerName}". ` +
-                                    `Please provide the manager ID you want to use.\n\n${managerList}`,
-
-                                data: executionResult,
-
-                                function_called: functionName
-                            });
-                        }
-
-                        return res.status(200).json({
-
-                            success: false,
-
-                            requiresManagerSelection: true,
-
-                            message: executionResult.error,
-
-                            data: executionResult,
-
-                            function_called: functionName
-                        });
-                    }
-
-
-                    // =====================================================
-                    // TASK SELECTION
-                    // =====================================================
-
-                    if (executionResult?.requiresTaskSelection) {
-
-                        if (executionResult.multipleTasks) {
-
-                            const taskList =
-                                (executionResult.tasks || [])
-                                    .map((task, index) =>
-                                        `${index + 1}. ${task.name} — ID: ${task.id}` +
-                                        (task.projectName
-                                            ? ` — Project: ${task.projectName}`
-                                            : "")
-                                    )
-                                    .join("\n");
-
-                            return res.status(200).json({
-
-                                success: false,
-
-                                requiresTaskSelection: true,
-
-                                message:
-                                    `I found multiple tasks named "${executionResult.taskName}". ` +
-                                    `Please provide the task ID you want to use.\n\n${taskList}`,
-
-                                data: executionResult,
-
-                                function_called: functionName
-                            });
-                        }
-
-                        return res.status(200).json({
-
-                            success: false,
-
-                            requiresTaskSelection: true,
-
-                            message: executionResult.error,
-
-                            data: executionResult,
-
-                            function_called: functionName
-                        });
-                    }
-
-
-                    // =====================================================
-                    // MEMBER / ASSIGNEE SELECTION
-                    // =====================================================
-
-                    if (executionResult?.requiresAssigneeSelection) {
-
-                        if (executionResult.multipleAssignees) {
-
-                            const memberList =
-                                (executionResult.members || [])
-                                    .map((member, index) =>
-                                        `${index + 1}. ${member.fullName} — ID: ${member.id}` +
-                                        (member.email
-                                            ? ` — ${member.email}`
-                                            : "")
-                                    )
-                                    .join("\n");
-
-                            return res.status(200).json({
-
-                                success: false,
-
-                                requiresAssigneeSelection: true,
-
-                                message:
-                                    `I found multiple Members named "${executionResult.assigneeName}". ` +
-                                    `Please provide the Member ID you want to use.\n\n${memberList}`,
-
-                                data: executionResult,
-
-                                function_called: functionName
-                            });
-                        }
-
-                        return res.status(200).json({
-
-                            success: false,
-
-                            requiresAssigneeSelection: true,
-
-                            message: executionResult.error,
-
-                            data: executionResult,
-
-                            function_called: functionName
-                        });
-                    }
-                
-                 // =====================================================
-// GENERATE APPROPRIATE RESPONSE BASED ON FUNCTION TYPE
-// =====================================================
-
-let finalMessage;
-
-// For data retrieval functions, format the data directly
-if (functionName === 'getProjects') {
-    const projects = executionResult?.projects || [];
-    if (projects.length === 0) {
-        finalMessage = "No projects were found matching your criteria.";
-    } else {
-        let projectList = `📋 **${projects.length} Project(s) Found:**\n\n`;
-        projects.forEach((project, index) => {
-            const name = project.name || 'Unnamed Project';
-            const deadline = project.deadline || 'No deadline set';
-            const status = project.status || 'Unknown';
-            const priority = project.priority || 'Not set';
-            const manager = project.managerName || project.manager?.fullName || 'Unassigned';
-            
-            projectList += `${index + 1}. **${name}**\n`;
-            projectList += `   📅 Deadline: ${deadline}\n`;
-            projectList += `   📊 Status: ${status}\n`;
-            projectList += `   ⚡ Priority: ${priority}\n`;
-            projectList += `   👤 Manager: ${manager}\n\n`;
-        });
-        finalMessage = projectList.trim();
-    }
-} 
-else if (functionName === 'getTasks') {
-    const tasks = executionResult?.tasks || [];
-    if (tasks.length === 0) {
-        finalMessage = "No tasks were found matching your criteria.";
-    } else {
-        let taskList = `📋 **${tasks.length} Task(s) Found:**\n\n`;
-        tasks.forEach((task, index) => {
-            const name = task.name || task.taskName || 'Unnamed Task';
-            const dueDate = task.dueDate || task.deadline || 'No due date set';
-            const status = task.status || 'Unknown';
-            const projectName = task.projectName || task.project?.name || 'No project';
-            const assignee = task.assigneeName || task.assignee?.fullName || 'Unassigned';
-            
-            taskList += `${index + 1}. **${name}**\n`;
-            taskList += `   📅 Due Date: ${dueDate}\n`;
-            taskList += `   📊 Status: ${status}\n`;
-            taskList += `   📁 Project: ${projectName}\n`;
-            taskList += `   👤 Assignee: ${assignee}\n\n`;
-        });
-        finalMessage = taskList.trim();
-    }
-}
-// For other functions (create, update, delete, assign), use AI to generate a response
-else {
-    finalMessage = await generateFinalResponse(functionName, executionResult, user);
+        actions: []
+    });
 }
 
-return res.status(200).json({
-    success: true,
-    message: finalMessage,
-    data: executionResult,
-    function_called: functionName
-});
 
-                } catch (error) {
-                    console.error(`❌ Function execution failed: ${functionName}`, error);
-                    return res.status(500).json({
-                        success: false,
-                        error: `Function execution failed: ${error.message}`
-                    });
-                }
-            } else {
-                console.error(`❌ Function "${functionName}" not found`);
-                return res.status(400).json({
-                    success: false,
-                    error: `Function "${functionName}" not found`,
-                    available_functions: Object.keys(functions)
-                });
-            }
+// =========================================================
+// VALIDATE ACTION COUNT
+// =========================================================
+
+console.log(
+    `🤖 AI generated ${actions.length} action(s)`
+);
+
+
+// =========================================================
+// EXECUTE ALL ACTIONS
+// =========================================================
+
+const execution =
+    await executeAIActions(
+        actions,
+        user
+    );
+
+
+// =========================================================
+// HANDLE SELECTION REQUIREMENTS
+// =========================================================
+
+const selectionRequired =
+    execution.results.find(
+        item =>
+            item.result?.requiresProjectSelection ||
+            item.result?.requiresManagerSelection ||
+            item.result?.requiresTaskSelection ||
+            item.result?.requiresAssigneeSelection
+    );
+
+
+if (selectionRequired) {
+
+    const result =
+        selectionRequired.result;
+
+
+    // ---------------------------------------------------------
+    // PROJECT SELECTION
+    // ---------------------------------------------------------
+
+    if (result.requiresProjectSelection) {
+
+        if (result.multipleProjects) {
+
+            const projectList =
+                (result.projects || [])
+                    .map(
+                        (project, index) =>
+                            `${index + 1}. ${project.name} — ID: ${project.id}`
+                    )
+                    .join("\n");
+
+            return res.status(200).json({
+
+                success: false,
+
+                requiresProjectSelection: true,
+
+                message:
+                    `I found multiple projects named "${result.projectName}". ` +
+                    `Please provide the project ID you want to use.\n\n` +
+                    projectList,
+
+                data: execution.results,
+
+                function_called:
+                    selectionRequired.function,
+
+                actions
+            });
         }
 
-        // No function call - return AI response directly
-        console.log('ℹ️ No function call detected, returning AI response');
         return res.status(200).json({
-            success: true,
-            message: aiResponse,
-            data: null,
-            function_called: null
-        });
 
-    } catch (error) {
-        console.error('❌ AI Agent error:', error);
-        return res.status(500).json({
             success: false,
-            error: error.message || 'Failed to process AI request',
-            ...(process.env.NODE_ENV !== 'production' && { stack: error.stack })
+
+            requiresProjectSelection: true,
+
+            message:
+                result.error ||
+                result.message,
+
+            data: execution.results,
+
+            function_called:
+                selectionRequired.function,
+
+            actions
         });
     }
-};
+
+
+    // ---------------------------------------------------------
+    // MANAGER SELECTION
+    // ---------------------------------------------------------
+
+    if (result.requiresManagerSelection) {
+
+        if (result.multipleManagers) {
+
+            const managerList =
+                (result.managers || [])
+                    .map(
+                        (manager, index) =>
+                            `${index + 1}. ${manager.fullName} — ID: ${manager.id}`
+                    )
+                    .join("\n");
+
+            return res.status(200).json({
+
+                success: false,
+
+                requiresManagerSelection: true,
+
+                message:
+                    `I found multiple Project Managers named "${result.managerName}". ` +
+                    `Please provide the manager ID you want to use.\n\n` +
+                    managerList,
+
+                data: execution.results,
+
+                function_called:
+                    selectionRequired.function,
+
+                actions
+            });
+        }
+
+        return res.status(200).json({
+
+            success: false,
+
+            requiresManagerSelection: true,
+
+            message:
+                result.error ||
+                result.message,
+
+            data: execution.results,
+
+            function_called:
+                selectionRequired.function,
+
+            actions
+        });
+    }
+
+
+    // ---------------------------------------------------------
+    // TASK SELECTION
+    // ---------------------------------------------------------
+
+    if (result.requiresTaskSelection) {
+
+        if (result.multipleTasks) {
+
+            const taskList =
+                (result.tasks || [])
+                    .map(
+                        (task, index) =>
+                            `${index + 1}. ${task.name || task.taskName} — ID: ${task.id}`
+                    )
+                    .join("\n");
+
+            return res.status(200).json({
+
+                success: false,
+
+                requiresTaskSelection: true,
+
+                message:
+                    `I found multiple tasks named "${result.taskName}". ` +
+                    `Please provide the task ID you want to use.\n\n` +
+                    taskList,
+
+                data: execution.results,
+
+                function_called:
+                    selectionRequired.function,
+
+                actions
+            });
+        }
+
+        return res.status(200).json({
+
+            success: false,
+
+            requiresTaskSelection: true,
+
+            message:
+                result.error ||
+                result.message,
+
+            data: execution.results,
+
+            function_called:
+                selectionRequired.function,
+
+            actions
+        });
+    }
+
+
+    // ---------------------------------------------------------
+    // ASSIGNEE SELECTION
+    // ---------------------------------------------------------
+
+    if (result.requiresAssigneeSelection) {
+
+        if (result.multipleAssignees) {
+
+            const memberList =
+                (result.members || [])
+                    .map(
+                        (member, index) =>
+                            `${index + 1}. ${member.fullName} — ID: ${member.id}`
+                    )
+                    .join("\n");
+
+            return res.status(200).json({
+
+                success: false,
+
+                requiresAssigneeSelection: true,
+
+                message:
+                    `I found multiple Members named "${result.assigneeName}". ` +
+                    `Please provide the Member ID you want to use.\n\n` +
+                    memberList,
+
+                data: execution.results,
+
+                function_called:
+                    selectionRequired.function,
+
+                actions
+            });
+        }
+
+        return res.status(200).json({
+
+            success: false,
+
+            requiresAssigneeSelection: true,
+
+            message:
+                result.error ||
+                result.message,
+
+            data: execution.results,
+
+            function_called:
+                selectionRequired.function,
+
+            actions
+        });
+    }
+}
+
+
+// =========================================================
+// FINAL HUMAN-FRIENDLY RESPONSE
+// =========================================================
+
+const finalMessage =
+    await generateMultiActionResponse(
+        execution.results,
+        user
+    );
+
+
+// =========================================================
+// FINAL API RESPONSE
+// =========================================================
+
+return res.status(200).json({
+
+    success: execution.success,
+
+    message: finalMessage,
+
+    data: execution.results,
+
+    function_called:
+        execution.results.length === 1
+            ? execution.results[0].function
+            : null,
+
+    actions: execution.results.map(
+        item => ({
+            function: item.function,
+            success: item.success,
+            result: item.result || null,
+            error: item.error || null,
+            permissionDenied:
+                item.permissionDenied || false
+        })
+    )
+});
