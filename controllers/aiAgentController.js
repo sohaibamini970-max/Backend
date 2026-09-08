@@ -3077,7 +3077,7 @@ const checkActionPermission = (functionName, user) => {
 
             createTask:
 
-                "Task creation is the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+                "Task creation is the responsibility of the Project Manager.",
 
             assignProject:
 
@@ -3085,7 +3085,7 @@ const checkActionPermission = (functionName, user) => {
 
             assignTask:
 
-                "Task assignment is the responsibility of the Project Manager, Executive Manager, or System Administrator.",
+                "Task assignment is the responsibility of the Project Manager",
 
             updateTaskStatus:
 
