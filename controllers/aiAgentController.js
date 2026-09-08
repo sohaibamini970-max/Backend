@@ -5272,6 +5272,7 @@ return res.status(200).json({
             error: item.error || null,
             permissionDenied:
                 item.permissionDenied || false
-        })
-    )
-});
+           })
+         )
+      });
+    }
