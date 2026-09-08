@@ -3516,7 +3516,7 @@ const executeAIActions = async (actions, user) => {
 
      */
 
-    const MAX_CONCURRENT = 1;
+    const MAX_CONCURRENT = 5;
 
     const results = new Array(actions.length);
 
