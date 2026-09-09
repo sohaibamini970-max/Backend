@@ -3032,9 +3032,355 @@ const functions = {
             projectName: updateData.name
         };
     },
-    assignAllProjectTasks: async (params, user) => {
-        return await assignAllProjectTasks(params, user);
-    }
+    // controllers/aiAgentController.js - Complete working version
+
+    const assignAllProjectTasks = async (params, user) => {
+        const { projectName, projectId, assigneeName, assigneeId } = params;
+
+        console.log('🔍 assignAllProjectTasks called:', { projectName, projectId, assigneeName, assigneeId });
+
+        // Step 1: Find the project
+        let resolvedProjectId = projectId;
+        let resolvedProjectName = projectName;
+
+        if (!resolvedProjectId && !resolvedProjectName) {
+            return {
+                success: false,
+                message: "Please provide a project name or project ID.",
+                tasks: [],
+                totalTasks: 0,
+                succeeded: 0,
+                failed: 0
+            };
+        }
+
+        // If only project name is provided, resolve it
+        if (!resolvedProjectId && resolvedProjectName) {
+            try {
+                // Try exact match first (case-insensitive)
+                let projectResult = await pool.query(
+                    `SELECT id, name FROM projects WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))`,
+                    [resolvedProjectName]
+                );
+
+                console.log(`🔎 Exact project lookup for "${resolvedProjectName}":`, projectResult.rows.length, 'matches');
+
+                // If no exact match, try partial match
+                if (projectResult.rows.length === 0) {
+                    console.log(`🔎 No exact match, trying partial match...`);
+
+                    projectResult = await pool.query(
+                        `SELECT id, name FROM projects WHERE LOWER(TRIM(name)) ILIKE $1 LIMIT 5`,
+                        [`%${resolvedProjectName.toLowerCase().trim()}%`]
+                    );
+
+                    console.log(`🔎 Partial project lookup:`, projectResult.rows.length, 'matches');
+                }
+
+                if (projectResult.rows.length === 0) {
+                    return {
+                        success: false,
+                        message: `No project named "${resolvedProjectName}" was found. Please check the spelling and try again.`,
+                        tasks: [],
+                        totalTasks: 0,
+                        succeeded: 0,
+                        failed: 0
+                    };
+                }
+
+                if (projectResult.rows.length > 1) {
+                    const projectList = projectResult.rows.map((p, i) =>
+                        `${i + 1}. "${p.name}" (ID: ${p.id})`
+                    ).join('\n');
+
+                    return {
+                        success: false,
+                        requiresProjectSelection: true,
+                        message: `Multiple projects found matching "${resolvedProjectName}". Please provide the project ID you want to use:\n\n${projectList}`,
+                        projects: projectResult.rows,
+                        tasks: [],
+                        totalTasks: 0,
+                        succeeded: 0,
+                        failed: 0
+                    };
+                }
+
+                resolvedProjectId = projectResult.rows[0].id;
+                resolvedProjectName = projectResult.rows[0].name;
+                console.log(`✅ Resolved project: "${resolvedProjectName}" (ID: ${resolvedProjectId})`);
+
+            } catch (error) {
+                console.error('❌ Project lookup error:', error);
+                return {
+                    success: false,
+                    message: `Error finding project: ${error.message}`,
+                    tasks: [],
+                    totalTasks: 0,
+                    succeeded: 0,
+                    failed: 0
+                };
+            }
+        }
+
+        // Step 2: Get all tasks for the project
+        let tasks = [];
+        try {
+            const tasksResult = await pool.query(
+                `SELECT 
+                t.id, 
+                t.name,
+                t.description,
+                t.status,
+                t.priority,
+                t.assignee_id,
+                t.start_date,
+                t.due_date,
+                u.full_name as assignee_name
+             FROM tasks t
+             LEFT JOIN users u ON t.assignee_id = u.id
+             WHERE t.project_id = $1
+             ORDER BY t.created_at DESC`,
+                [resolvedProjectId]
+            );
+
+            tasks = tasksResult.rows;
+            console.log(`📦 Found ${tasks.length} tasks in project "${resolvedProjectName}"`);
+
+            if (tasks.length > 0) {
+                console.log(`📋 Tasks:`, tasks.map(t => ({ id: t.id, name: t.name })));
+            }
+
+        } catch (error) {
+            console.error('❌ Tasks fetch error:', error);
+            return {
+                success: false,
+                message: `Error fetching tasks: ${error.message}`,
+                tasks: [],
+                totalTasks: 0,
+                succeeded: 0,
+                failed: 0
+            };
+        }
+
+        if (tasks.length === 0) {
+            return {
+                success: false,
+                message: `The project "${resolvedProjectName}" exists but currently has no tasks to assign. Please create tasks first, or specify a different project.`,
+                projectName: resolvedProjectName,
+                projectId: resolvedProjectId,
+                tasks: [],
+                totalTasks: 0,
+                succeeded: 0,
+                failed: 0
+            };
+        }
+
+        // Step 3: Resolve assignee (Member)
+        let resolvedAssigneeId = assigneeId;
+        let resolvedAssigneeName = assigneeName;
+
+        if (!resolvedAssigneeId && !resolvedAssigneeName) {
+            return {
+                success: false,
+                message: "Please provide a Member name or Member ID to assign the tasks to.",
+                tasks: [],
+                totalTasks: tasks.length,
+                succeeded: 0,
+                failed: 0
+            };
+        }
+
+        if (!resolvedAssigneeId && resolvedAssigneeName) {
+            try {
+                // Try exact match first
+                let memberResult = await pool.query(
+                    `SELECT id, full_name, email, role, is_active 
+                 FROM users 
+                 WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+                   AND role::text = 'Member'
+                   AND is_active = TRUE`,
+                    [resolvedAssigneeName]
+                );
+
+                console.log(`🔎 Exact Member lookup for "${resolvedAssigneeName}":`, memberResult.rows.length, 'matches');
+
+                // If no exact match, try partial
+                if (memberResult.rows.length === 0) {
+                    console.log(`🔎 No exact match, trying partial match for Member...`);
+
+                    memberResult = await pool.query(
+                        `SELECT id, full_name, email, role, is_active 
+                     FROM users 
+                     WHERE LOWER(TRIM(full_name)) ILIKE $1
+                       AND role::text = 'Member'
+                       AND is_active = TRUE
+                     LIMIT 5`,
+                        [`%${resolvedAssigneeName.toLowerCase().trim()}%`]
+                    );
+
+                    console.log(`🔎 Partial Member lookup:`, memberResult.rows.length, 'matches');
+                }
+
+                if (memberResult.rows.length === 0) {
+                    // Check if the user exists but with a different role
+                    const userCheck = await pool.query(
+                        `SELECT id, full_name, email, role, is_active 
+                     FROM users 
+                     WHERE LOWER(TRIM(full_name)) ILIKE $1
+                     LIMIT 5`,
+                        [`%${resolvedAssigneeName.toLowerCase().trim()}%`]
+                    );
+
+                    if (userCheck.rows.length > 0) {
+                        const userList = userCheck.rows.map((u, i) =>
+                            `${i + 1}. "${u.full_name}" (${u.email}) - Role: ${u.role}`
+                        ).join('\n');
+
+                        return {
+                            success: false,
+                            message: `No active Member named "${resolvedAssigneeName}" was found. Found these users with similar names:\n\n${userList}\n\nPlease provide a valid Member name or ID.`,
+                            tasks: [],
+                            totalTasks: tasks.length,
+                            succeeded: 0,
+                            failed: 0
+                        };
+                    }
+
+                    return {
+                        success: false,
+                        message: `No user named "${resolvedAssigneeName}" was found. Please check the spelling and try again.`,
+                        tasks: [],
+                        totalTasks: tasks.length,
+                        succeeded: 0,
+                        failed: 0
+                    };
+                }
+
+                if (memberResult.rows.length > 1) {
+                    const memberList = memberResult.rows.map((m, i) =>
+                        `${i + 1}. "${m.full_name}" (${m.email}) - ID: ${m.id}`
+                    ).join('\n');
+
+                    return {
+                        success: false,
+                        requiresAssigneeSelection: true,
+                        message: `Multiple Members named "${resolvedAssigneeName}" were found. Please provide the Member ID you want to use:\n\n${memberList}`,
+                        members: memberResult.rows,
+                        tasks: [],
+                        totalTasks: tasks.length,
+                        succeeded: 0,
+                        failed: 0
+                    };
+                }
+
+                resolvedAssigneeId = memberResult.rows[0].id;
+                resolvedAssigneeName = memberResult.rows[0].full_name;
+                console.log(`✅ Resolved assignee: "${resolvedAssigneeName}" (ID: ${resolvedAssigneeId})`);
+
+            } catch (error) {
+                console.error('❌ Member lookup error:', error);
+                return {
+                    success: false,
+                    message: `Error finding Member: ${error.message}`,
+                    tasks: [],
+                    totalTasks: tasks.length,
+                    succeeded: 0,
+                    failed: 0
+                };
+            }
+        }
+
+        // Step 4: Assign each task to the specified person
+        const assignmentResults = [];
+        let allSucceeded = true;
+
+        console.log(`📤 Assigning ${tasks.length} tasks to "${resolvedAssigneeName}"...`);
+
+        for (const task of tasks) {
+            try {
+                // Check if task is already assigned to this person
+                if (task.assignee_id === resolvedAssigneeId) {
+                    assignmentResults.push({
+                        taskId: task.id,
+                        taskName: task.name || 'Unnamed Task',
+                        success: true,
+                        alreadyAssigned: true,
+                        message: `Task "${task.name || 'Unnamed Task'}" is already assigned to ${resolvedAssigneeName}`
+                    });
+                    console.log(`ℹ️ Task "${task.name}" already assigned to ${resolvedAssigneeName}`);
+                    continue;
+                }
+
+                // Update the task with the assignee
+                const updateResult = await pool.query(
+                    `UPDATE tasks 
+                 SET assignee_id = $1, updated_at = CURRENT_TIMESTAMP 
+                 WHERE id = $2 
+                 RETURNING id, name, status, priority, due_date`,
+                    [resolvedAssigneeId, task.id]
+                );
+
+                const updatedTask = updateResult.rows[0];
+
+                assignmentResults.push({
+                    taskId: task.id,
+                    taskName: task.name || 'Unnamed Task',
+                    success: true,
+                    result: updatedTask,
+                    message: `Assigned "${task.name || 'Unnamed Task'}" to ${resolvedAssigneeName}`
+                });
+
+                console.log(`✅ Assigned task "${task.name}" to ${resolvedAssigneeName}`);
+
+            } catch (error) {
+                console.error(`❌ Failed to assign task ${task.id}:`, error);
+                assignmentResults.push({
+                    taskId: task.id,
+                    taskName: task.name || 'Unnamed Task',
+                    success: false,
+                    error: error.message,
+                    message: `Failed to assign "${task.name || 'Unnamed Task'}"`
+                });
+                allSucceeded = false;
+            }
+        }
+
+        const succeededCount = assignmentResults.filter(r => r.success).length;
+        const failedCount = assignmentResults.filter(r => !r.success).length;
+        const alreadyAssignedCount = assignmentResults.filter(r => r.alreadyAssigned).length;
+
+        // Step 5: Build response message
+        let responseMessage = '';
+        const newlyAssigned = succeededCount - alreadyAssignedCount;
+
+        if (tasks.length === 0) {
+            responseMessage = `No tasks found in project "${resolvedProjectName}".`;
+        } else if (newlyAssigned === tasks.length) {
+            responseMessage = `✅ Successfully assigned all ${tasks.length} tasks from "${resolvedProjectName}" to ${resolvedAssigneeName}.`;
+        } else if (newlyAssigned > 0 && alreadyAssignedCount > 0) {
+            responseMessage = `✅ Assigned ${newlyAssigned} new task(s) from "${resolvedProjectName}" to ${resolvedAssigneeName}. ${alreadyAssignedCount} task(s) were already assigned.`;
+        } else if (newlyAssigned > 0) {
+            responseMessage = `✅ Assigned ${newlyAssigned} out of ${tasks.length} tasks from "${resolvedProjectName}" to ${resolvedAssigneeName}. ${failedCount} task(s) failed.`;
+        } else if (alreadyAssignedCount === tasks.length) {
+            responseMessage = `ℹ️ All ${tasks.length} tasks from "${resolvedProjectName}" are already assigned to ${resolvedAssigneeName}.`;
+        } else {
+            responseMessage = `❌ Failed to assign tasks from "${resolvedProjectName}" to ${resolvedAssigneeName}. Please check the logs for details.`;
+        }
+
+        return {
+            success: allSucceeded,
+            message: responseMessage,
+            projectName: resolvedProjectName,
+            projectId: resolvedProjectId,
+            assigneeName: resolvedAssigneeName,
+            assigneeId: resolvedAssigneeId,
+            tasks: assignmentResults,
+            totalTasks: tasks.length,
+            succeeded: succeededCount,
+            failed: failedCount,
+            alreadyAssigned: alreadyAssignedCount
+        };
+    };
 };
 
 const extractJsonObject = (text) => {
