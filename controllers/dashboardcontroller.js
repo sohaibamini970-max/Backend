@@ -520,122 +520,101 @@ const getCompleteDashboard = async (req, res) => {
 };
 
 // controllers/dashboardcontroller.js - Add this new function
-
 const getOptimizedDashboard = async (req, res) => {
     try {
         console.log('🚀 Fetching optimized dashboard data');
         const userId = req.user?.id;
 
-        // Get user role for filtering
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: "User not authenticated"
+            });
+        }
+
+        // Get user details with correct column names
         const userResult = await safeQuery(
-            'SELECT role, job_title FROM users WHERE id = $1',
+            'SELECT id, role, job_title, full_name, email, is_active FROM users WHERE id = $1',
             [userId]
         );
         
         const user = userResult.rows[0];
-        const userRole = user?.role?.toLowerCase() || '';
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
 
-        // Determine if user is management
-        const isManagement = ['executive manager', 'system administrator', 'admin'].some(
-            role => userRole.includes(role)
-        );
-        const isProjectManager = userRole.includes('project manager');
+        console.log('📝 User found:', user.full_name, user.role);
 
-        // Parallel queries for all data
-        const [
-            projectsResult,
-            tasksResult,
-            teamResult,
-            projectStatsResult,
-            taskStatsResult
-        ] = await Promise.all([
-            // Get projects with filters
-            safeQuery(`
-                SELECT 
-                    p.id, p.name, p.domain, p.about_title, p.about_description,
-                    p.status, p.priority, p.start_date, p.deadline, p.progress,
-                    p.created_at, p.updated_at,
-                    u.full_name as creator_name,
-                    mu.full_name as manager_name,
-                    mu.email as manager_email
-                FROM projects p
-                LEFT JOIN users u ON p.created_by = u.id
-                LEFT JOIN users mu ON p.manager_id = mu.id
-                ${!isManagement && isProjectManager ? 'WHERE p.manager_id = $1' : ''}
-                ${!isManagement && !isProjectManager ? 'WHERE p.id IN (SELECT DISTINCT project_id FROM tasks WHERE assignee_id = $1)' : ''}
-                ORDER BY p.created_at DESC
-            `, isManagement ? [] : [userId]),
+        // Get ALL projects (no filtering for now to test)
+        const projectsResult = await safeQuery(`
+            SELECT 
+                p.id, p.name, p.domain, p.about_title, p.about_description,
+                p.status, p.priority, p.start_date, p.deadline, p.progress,
+                p.created_at, p.updated_at,
+                u.full_name as creator_name,
+                mu.full_name as manager_name,
+                mu.email as manager_email
+            FROM projects p
+            LEFT JOIN users u ON p.created_by = u.id
+            LEFT JOIN users mu ON p.manager_id = mu.id
+            ORDER BY p.created_at DESC
+            LIMIT 50
+        `);
 
-            // Get tasks with filters
-            safeQuery(`
-                SELECT 
-                    t.id, t.name, t.title, t.description,
-                    t.project_id, t.assignee_id,
-                    u.full_name as assignee_name,
-                    t.status, t.priority,
-                    t.start_date, t.due_date,
-                    t.created_at, t.updated_at
-                FROM tasks t
-                LEFT JOIN users u ON t.assignee_id = u.id
-                ${!isManagement && isProjectManager ? 'WHERE t.project_id IN (SELECT id FROM projects WHERE manager_id = $1)' : ''}
-                ${!isManagement && !isProjectManager ? 'WHERE t.assignee_id = $1' : ''}
-                ORDER BY t.created_at DESC
-            `, isManagement ? [] : [userId]),
+        // Get ALL tasks
+        const tasksResult = await safeQuery(`
+            SELECT 
+                t.id, t.name, t.title, t.description,
+                t.project_id, t.assignee_id,
+                u.full_name as assignee_name,
+                t.status, t.priority,
+                t.start_date, t.due_date,
+                t.created_at, t.updated_at
+            FROM tasks t
+            LEFT JOIN users u ON t.assignee_id = u.id
+            ORDER BY t.created_at DESC
+            LIMIT 100
+        `);
 
-            // Get team overview (cached)
-            safeQuery(`
-                SELECT id, role, job_title 
-                FROM users 
-                WHERE is_active = TRUE
-            `),
+        // Get team overview
+        const teamResult = await safeQuery(`
+            SELECT id, role, job_title, full_name
+            FROM users 
+            WHERE is_active = TRUE
+        `);
 
-            // Get project stats
-            safeQuery(`
-                SELECT 
-                    COUNT(*) as total_projects,
-                    COUNT(CASE WHEN status = 'Done' THEN 1 END) as completed_projects,
-                    COUNT(CASE WHEN status = 'In Progress' THEN 1 END) as in_progress_projects,
-                    COALESCE(AVG(progress), 0) as avg_progress
-                FROM projects
-                ${!isManagement && isProjectManager ? 'WHERE manager_id = $1' : ''}
-                ${!isManagement && !isProjectManager ? 'WHERE id IN (SELECT DISTINCT project_id FROM tasks WHERE assignee_id = $1)' : ''}
-            `, isManagement ? [] : [userId]),
-
-            // Get task stats
-            safeQuery(`
-                SELECT 
-                    COUNT(*) as total_tasks,
-                    COUNT(CASE WHEN status = 'Done' THEN 1 END) as completed_tasks,
-                    COUNT(CASE WHEN status = 'In Progress' THEN 1 END) as in_progress_tasks,
-                    COUNT(CASE WHEN status = 'To Do' THEN 1 END) as todo_tasks,
-                    COUNT(CASE WHEN status = 'Backlog' THEN 1 END) as backlog_tasks
-                FROM tasks
-                ${!isManagement && isProjectManager ? 'WHERE project_id IN (SELECT id FROM projects WHERE manager_id = $1)' : ''}
-                ${!isManagement && !isProjectManager ? 'WHERE assignee_id = $1' : ''}
-            `, isManagement ? [] : [userId])
-        ]);
-
-        // Process team data
-        let developers = 0, designers = 0, managers = 0, qa = 0, other = 0;
-        teamResult.rows.forEach((user) => {
-            const classification = classifyUserRole(user);
-            switch (classification.category) {
-                case 'developer': developers++; break;
-                case 'designer': designers++; break;
-                case 'manager': managers++; break;
-                case 'qa': qa++; break;
-                default: other++; break;
-            }
+        console.log('📊 Data counts:', {
+            projects: projectsResult.rows.length,
+            tasks: tasksResult.rows.length,
+            team: teamResult.rows.length
         });
 
-        // Process project stats
-        const projectStats = projectStatsResult.rows[0] || {};
-        const taskStats = taskStatsResult.rows[0] || {};
+        // Process team data with better error handling
+        let developers = 0, designers = 0, managers = 0, qa = 0, other = 0;
+        
+        teamResult.rows.forEach((teamUser) => {
+            try {
+                const classification = classifyUserRole(teamUser);
+                switch (classification.category) {
+                    case 'developer': developers++; break;
+                    case 'designer': designers++; break;
+                    case 'manager': managers++; break;
+                    case 'qa': qa++; break;
+                    default: other++; break;
+                }
+            } catch (err) {
+                console.error('Error classifying user:', teamUser.id, err);
+                other++;
+            }
+        });
 
         // Get active projects (limit to 3)
         const activeProjects = projectsResult.rows
             .filter(p => {
-                const status = p.status?.toLowerCase()?.trim();
+                const status = p.status?.toLowerCase()?.trim() || '';
                 return status !== 'done' && status !== 'completed';
             })
             .slice(0, 3);
@@ -644,18 +623,15 @@ const getOptimizedDashboard = async (req, res) => {
         const domainMap = {};
         projectsResult.rows.forEach(p => {
             if (p.domain?.trim()) {
-                domainMap[p.domain.trim()] = (domainMap[p.domain.trim()] || 0) + 1;
+                const domain = p.domain.trim();
+                domainMap[domain] = (domainMap[domain] || 0) + 1;
             }
         });
         const domainStats = Object.entries(domainMap)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
 
-        // Get tasks for schedule (next 7 days)
-        const today = new Date();
-        const nextWeek = new Date(today);
-        nextWeek.setDate(nextWeek.getDate() + 7);
-        
+        // Get tasks for schedule
         const scheduleTasks = tasksResult.rows
             .filter(t => t.due_date)
             .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
@@ -668,7 +644,7 @@ const getOptimizedDashboard = async (req, res) => {
             );
             const totalTasks = projectTasks.length;
             const completedTasks = projectTasks.filter(
-                task => ['done', 'completed'].includes(task.status?.toLowerCase()?.trim())
+                task => ['done', 'completed'].includes(task.status?.toLowerCase()?.trim() || '')
             ).length;
             const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
             
@@ -681,25 +657,36 @@ const getOptimizedDashboard = async (req, res) => {
         });
 
         // Calculate task stats
-        const totalTasks = taskStats.total_tasks || 0;
-        const completedTasks = taskStats.completed_tasks || 0;
-        const inProgressTasks = taskStats.in_progress_tasks || 0;
-        const pendingTasks = (taskStats.todo_tasks || 0) + (taskStats.backlog_tasks || 0);
+        const totalTasks = tasksResult.rows.length;
+        const completedTasks = tasksResult.rows.filter(
+            t => ['done', 'completed'].includes(t.status?.toLowerCase()?.trim() || '')
+        ).length;
+        const inProgressTasks = tasksResult.rows.filter(
+            t => ['in progress', 'in_progress'].includes(t.status?.toLowerCase()?.trim() || '')
+        ).length;
+        const pendingTasks = tasksResult.rows.filter(
+            t => ['to do', 'todo', 'pending', 'backlog'].includes(t.status?.toLowerCase()?.trim() || '')
+        ).length;
 
-        // Response time: ~200-400ms
+        const userFullName = user.full_name || 'User';
+        const userRole = user.role || '';
+
+        console.log('✅ Dashboard data prepared successfully');
+
         return res.status(200).json({
             success: true,
             data: {
                 user: {
                     id: userId,
-                    role: user?.role,
-                    firstName: req.user?.full_name?.split(' ')[0] || 'User',
-                    lastName: req.user?.full_name?.split(' ').slice(1).join(' ') || '',
+                    role: userRole,
+                    firstName: userFullName.split(' ')[0] || 'User',
+                    lastName: userFullName.split(' ').slice(1).join(' ') || '',
+                    email: user.email || '',
                 },
                 projects: projectsResult.rows,
                 tasks: tasksResult.rows,
                 teams: {
-                    total: teamResult.rows.length,
+                    total: teamResult.rows.length || 0,
                     developers,
                     designers,
                     managers,
@@ -707,10 +694,10 @@ const getOptimizedDashboard = async (req, res) => {
                     other,
                 },
                 projectStats: {
-                    total: parseInt(projectStats.total_projects) || 0,
-                    completed: parseInt(projectStats.completed_projects) || 0,
-                    inProgress: parseInt(projectStats.in_progress_projects) || 0,
-                    averageProgress: Math.round(parseFloat(projectStats.avg_progress) || 0),
+                    total: projectsResult.rows.length || 0,
+                    completed: projectsResult.rows.filter(p => p.status?.toLowerCase() === 'done').length,
+                    inProgress: projectsResult.rows.filter(p => p.status?.toLowerCase() === 'in progress').length,
+                    averageProgress: 0,
                 },
                 taskStats: {
                     total: totalTasks,
@@ -722,22 +709,24 @@ const getOptimizedDashboard = async (req, res) => {
                 domainStats,
                 scheduleTasks,
                 projectOverview,
-                // Role info
-                isManagement,
-                isProjectManager,
-                isMember: !isManagement && !isProjectManager,
-                roleDescription: isManagement ? 'Organization-wide project and task overview.' :
-                               isProjectManager ? 'Overview of projects assigned to you and their tasks.' :
-                               'Overview of your assigned projects and tasks.'
+                isManagement: ['executive manager', 'system administrator', 'admin'].some(
+                    role => userRole.toLowerCase().includes(role)
+                ),
+                isProjectManager: userRole.toLowerCase().includes('project manager'),
+                isMember: true,
+                roleDescription: 'Overview of your projects and tasks.'
             }
         });
 
     } catch (error) {
         console.error("❌ Optimized dashboard error:", error);
+        console.error("Stack:", error.stack);
+
         return res.status(500).json({
             success: false,
             message: "Failed to load dashboard data.",
-            ...(process.env.NODE_ENV !== 'production' && { error: error.message })
+            error: error.message,
+            stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
         });
     }
 };
