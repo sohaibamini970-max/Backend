@@ -154,6 +154,65 @@ const safeExecute = async (controllerFn, req, res) => {
     }
 };
 
+// Add to the functions object in aiAgentController.js
+
+// Add this function before the functions object
+const assignAllProjectTasks = async (params, user) => {
+    const { projectName, projectId, assigneeName, assigneeId } = params;
+
+    console.log('🔍 assignAllProjectTasks called:', { projectName, projectId, assigneeName, assigneeId });
+
+    // Step 1: Get all tasks for the project
+    const tasksResult = await functions.getTasks({ projectName, projectId }, user);
+
+    if (!tasksResult.success || !tasksResult.tasks || tasksResult.tasks.length === 0) {
+        return {
+            success: false,
+            message: `No tasks found in project "${projectName || projectId}".`,
+            tasks: [],
+            totalTasks: 0,
+            succeeded: 0,
+            failed: 0
+        };
+    }
+
+    const tasks = tasksResult.tasks;
+    console.log(`📦 Found ${tasks.length} tasks in project`);
+
+    // Step 2: Assign each task to the specified person
+    const assignmentResults = [];
+    let allSucceeded = true;
+
+    for (const task of tasks) {
+        const assignResult = await functions.assignTask({
+            taskId: task.id,
+            taskName: task.name || task.title,
+            assigneeName,
+            assigneeId
+        }, user);
+
+        assignmentResults.push({
+            taskId: task.id,
+            taskName: task.name || task.title,
+            success: assignResult.success !== false,
+            result: assignResult
+        });
+
+        if (assignResult.success === false) {
+            allSucceeded = false;
+        }
+    }
+
+    return {
+        success: allSucceeded,
+        message: `Assigned ${assignmentResults.filter(r => r.success).length} out of ${tasks.length} tasks to ${assigneeName || assigneeId}.`,
+        tasks: assignmentResults,
+        totalTasks: tasks.length,
+        succeeded: assignmentResults.filter(r => r.success).length,
+        failed: assignmentResults.filter(r => !r.success).length
+    };
+};
+
 // Function definitions with better error handling
 const functions = {
     createProject: async (params, user) => {
@@ -2715,6 +2774,9 @@ const functions = {
             projectName: updateData.name
         };
     },
+    assignAllProjectTasks: async (params, user) => {
+        return await assignAllProjectTasks(params, user);
+    }
 };
 
 const extractJsonObject = (text) => {
@@ -3200,7 +3262,13 @@ const ACTION_PERMISSIONS = {
     updateProject: [  
         "Executive Manager",
         "System Administrator"
+    ],
+    assignAllProjectTasks: [
+        "Project Manager",
+        "Executive Manager",
+        "System Administrator"
     ]
+
 
 };
 
@@ -4053,7 +4121,7 @@ If multiple Members have the same name:
 
 Never invent IDs.
 
-// Add this after the createTask description
+=========================================================
 
 12. updateProject
 
@@ -4115,6 +4183,111 @@ IMPORTANT:
 - Never invent dates.
 - Never invent project information.
 - The project must exist before updating.
+
+=========================================================
+
+13. assignAllProjectTasks
+
+Parameters:
+
+{
+  "projectName": "string|null",
+  "projectId": "string|null",
+  "assigneeName": "string|null",
+  "assigneeId": "string|null"
+}
+
+Purpose:
+Assigns ALL tasks from a project to a Member.
+
+Required:
+- projectName OR projectId
+- assigneeName OR assigneeId
+
+Usage Examples:
+
+User:
+Assign Healthcare Patient Portal Project tasks to Steve Jobs
+
+Return:
+
+[FUNCTION:assignAllProjectTasks]{"projectName":"Healthcare Patient Portal Project","assigneeName":"Steve Jobs"}
+
+User:
+Assign all tasks from AI Chatbot to Tony Stark
+
+Return:
+
+[FUNCTION:assignAllProjectTasks]{"projectName":"AI Chatbot","assigneeName":"Tony Stark"}
+
+User:
+Assign tasks from project ID abc-123 to Maria Khan
+
+Return:
+
+[FUNCTION:assignAllProjectTasks]{"projectId":"abc-123","assigneeName":"Maria Khan"}
+
+What this function does:
+1. Finds ALL tasks in the specified project
+2. Assigns EACH task to the specified Member
+3. Returns a summary of all assignments
+
+IMPORTANT:
+- Only Project Managers, Executive Managers, and System Administrators can use this.
+- Only users with role "Member" can receive tasks.
+- If multiple projects have the same name, ask for the project ID.
+- If multiple Members have the same name, ask for the Member ID.
+- If no tasks are found in the project, it returns an error.
+- Never invent task names or IDs.
+
+=========================================================
+PROJECT-LEVEL TASK ASSIGNMENT HANDLING
+=========================================================
+
+When the user says "assign [PROJECT] tasks to [PERSON]":
+
+Examples:
+- "assign Healthcare Patient Portal Project tasks to Steve Jobs"
+- "assign all tasks from AI Chatbot to Tony Stark"
+- "assign the tasks from Employee Portal to Maria Khan"
+- "give me all tasks from Sales System and assign them to Ahmed"
+
+ALWAYS use assignAllProjectTasks for these requests.
+
+DO NOT use getTasks or assignTask individually for these requests.
+
+If the user says "assign [specific task name] to [person]", use assignTask.
+
+Examples of when to use assignTask:
+- "assign Design Login Page to Tony Stark"
+- "assign Fix Authentication task to Ahmed"
+
+=========================================================
+TASK ASSIGNMENT FLOW
+=========================================================
+
+1. Parse the user's request
+
+2. If the request mentions a project name AND "tasks" (plural) AND a person:
+   → Use assignAllProjectTasks
+   → Example: "assign AI Chatbot tasks to Tony Stark"
+
+3. If the request mentions a specific task name AND a person:
+   → Use assignTask
+   → Example: "assign Design Login Page to Tony Stark"
+
+4. If the request mentions a project name AND a person but NO specific task:
+   → Use assignAllProjectTasks
+   → Example: "assign Healthcare Patient Portal Project to Steve Jobs" (implied tasks)
+
+5. If no tasks are found in the project:
+   → Return: "I couldn't find any tasks in [project name]."
+
+6. If multiple projects match the name:
+   → List them and ask: "Which project did you mean?"
+
+7. If multiple Members match the name:
+   → List them and ask: "Which Member did you mean?"
 
 =========================================================
 PROJECT LISTING INTELLIGENCE
@@ -4920,6 +5093,25 @@ Return:
   ]
 }
 
+Example 2 - Assign all project tasks:
+
+User:
+Assign Healthcare Patient Portal Project tasks to Steve Jobs
+
+Return:
+
+{
+  "actions": [
+    {
+      "function": "assignAllProjectTasks",
+      "arguments": {
+        "projectName": "Healthcare Patient Portal Project",
+        "assigneeName": "Steve Jobs"
+      }
+    }
+  ]
+}
+
 IMPORTANT:
 
 If a request contains multiple independent operations,
@@ -5039,6 +5231,11 @@ Task assignment:
 
 Task recipient:
 - Member only
+
+Assign all project tasks:
+- Project Manager
+- Executive Manager
+- System Administrator
 
 Work submission:
 - Member only
