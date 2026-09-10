@@ -602,10 +602,187 @@ const getTaskHistory = async (req, res) => {
     }
 };
 
+/* =========================================================
+   GET ALL MEMBERS AGGREGATE PERFORMANCE (Manager default view)
+   GET /api/performance/all
+========================================================= */
+
+const getAllMembersPerformance = async (req, res) => {
+    try {
+        const requestingUser = req.user;
+
+        // Only managers and admins
+        if (
+            !["Project Manager", "Executive Manager", "System Administrator"].includes(
+                requestingUser.role
+            )
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "Only managers and administrators can view aggregate performance.",
+            });
+        }
+
+        // Aggregate stats across all members
+        const statsResult = await safeQuery(
+            `
+            SELECT
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (WHERE t.status IN ('To Do', 'In Progress'))::INTEGER AS pending_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.status = 'Done'
+                    AND t.completed_at IS NOT NULL
+                    AND t.due_date IS NOT NULL
+                    AND t.completed_at::DATE > t.due_date::DATE
+                )::INTEGER AS overdue_done_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS not_completed_tasks,
+                COUNT(DISTINCT t.project_id)::INTEGER AS project_count,
+                ROUND(
+                    COUNT(t.id) FILTER (WHERE t.status = 'Done')::NUMERIC /
+                    NULLIF(COUNT(t.id), 0) * 100, 1
+                )::NUMERIC AS completion_rate,
+                ROUND(
+                    COUNT(t.id) FILTER (
+                        WHERE t.status = 'Done'
+                        AND t.completed_at IS NOT NULL
+                        AND (t.due_date IS NULL OR t.completed_at::DATE <= t.due_date::DATE)
+                    )::NUMERIC /
+                    NULLIF(COUNT(t.id) FILTER (WHERE t.status = 'Done'), 0) * 100, 1
+                )::NUMERIC AS on_time_rate,
+                ROUND(
+                    AVG(EXTRACT(EPOCH FROM (t.completed_at - t.created_at)) / 86400)
+                    FILTER (WHERE t.status = 'Done' AND t.completed_at IS NOT NULL),
+                    1
+                )::NUMERIC AS avg_completion_days
+            FROM tasks t
+            LEFT JOIN users u ON t.assignee_id = u.id
+            WHERE u.role = 'Member'
+            `
+        );
+
+        const statusBreakdown = await safeQuery(
+            `
+            SELECT t.status, COUNT(*)::INTEGER AS count
+            FROM tasks t
+            JOIN users u ON t.assignee_id = u.id
+            WHERE u.role = 'Member'
+            GROUP BY t.status
+            `
+        );
+
+        const priorityBreakdown = await safeQuery(
+            `
+            SELECT t.priority, COUNT(*)::INTEGER AS count
+            FROM tasks t
+            JOIN users u ON t.assignee_id = u.id
+            WHERE u.role = 'Member'
+            GROUP BY t.priority
+            `
+        );
+
+        const projectBreakdown = await safeQuery(
+            `
+            SELECT
+                p.id AS project_id,
+                p.name AS project_name,
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks
+            FROM tasks t
+            JOIN users u ON t.assignee_id = u.id
+            JOIN projects p ON t.project_id = p.id
+            WHERE u.role = 'Member'
+            GROUP BY p.id, p.name
+            ORDER BY total_tasks DESC
+            `
+        );
+
+        const stats = statsResult.rows[0] || {};
+
+        return res.status(200).json({
+            success: true,
+            stats: {
+                totalTasks: parseInt(stats.total_tasks || 0),
+                completedTasks: parseInt(stats.completed_tasks || 0),
+                pendingTasks: parseInt(stats.pending_tasks || 0),
+                overdueTasks: parseInt(stats.overdue_tasks || 0),
+                overdueDoneTasks: parseInt(stats.overdue_done_tasks || 0),
+                notCompletedTasks: parseInt(stats.not_completed_tasks || 0),
+                projectCount: parseInt(stats.project_count || 0),
+                completionRate: parseFloat(stats.completion_rate || 0),
+                onTimeRate: parseFloat(stats.on_time_rate || 0),
+                avgCompletionDays: parseFloat(stats.avg_completion_days || 0),
+            },
+            statusBreakdown: statusBreakdown.rows,
+            priorityBreakdown: priorityBreakdown.rows,
+            projectBreakdown: projectBreakdown.rows,
+        });
+    } catch (error) {
+        console.error("❌ Get all members performance error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve aggregate performance.",
+            ...(process.env.NODE_ENV !== "production" && { error: error.message }),
+        });
+    }
+};
+
+/* =========================================================
+   GET ALL MEMBERS LIST (for dropdown)
+   GET /api/performance/members-list
+========================================================= */
+
+const getMembersList = async (req, res) => {
+    try {
+        const requestingUser = req.user;
+
+        if (
+            !["Project Manager", "Executive Manager", "System Administrator"].includes(
+                requestingUser.role
+            )
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "Only managers and administrators can view members list.",
+            });
+        }
+
+        const result = await safeQuery(
+            `
+            SELECT id, full_name, email
+            FROM users
+            WHERE role = 'Member' AND is_active = TRUE
+            ORDER BY full_name ASC
+            `
+        );
+
+        return res.status(200).json({
+            success: true,
+            members: result.rows,
+        });
+    } catch (error) {
+        console.error("❌ Get members list error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve members list.",
+        });
+    }
+};
+
 module.exports = {
     getMemberPerformance,
     getTeamPerformance,
     getPerformanceTrends,
     createPerformanceSnapshot,
-    getTaskHistory, 
+    getTaskHistory,
+    getAllMembersPerformance, 
+    getMembersList,           
 };
