@@ -681,6 +681,95 @@ const functions = {
             console.log(`📦 ${projects.length} projects received from backend`);
 
             // =====================================================
+            // ROLE-BASED VISIBILITY FILTER
+            // =====================================================
+            // Project Manager                       → only projects assigned to them
+            // Executive Manager                     → all projects
+            // System Administrator                  → all projects
+            // Member                                → all projects (or restricted, per your rules)
+            // =====================================================
+
+            const userRole = String(user?.role || "").trim();
+            const userId = String(user?.id || "");
+            const userName = String(
+                user?.full_name ||
+                user?.fullName ||
+                user?.name ||
+                ""
+            ).trim().toLowerCase();
+
+            if (userRole === "Project Manager") {
+
+                console.log(
+                    `🎯 Applying Project Manager filter for user: ${userId} (${userName})`
+                );
+
+                // Log sample project so we can see the shape
+                if (projects.length > 0) {
+                    console.log(
+                        "🔎 Sample project fields:",
+                        Object.keys(projects[0])
+                    );
+                    console.log(
+                        "🔎 Sample project:",
+                        {
+                            name: projects[0].name,
+                            project_manager_id: projects[0].project_manager_id,
+                            projectManagerId: projects[0].projectManagerId,
+                            manager_id: projects[0].manager_id,
+                            managerId: projects[0].managerId,
+                            manager_name: projects[0].manager_name,
+                            managerName: projects[0].managerName,
+                            manager_full_name: projects[0].manager_full_name,
+                            managerFullName: projects[0].managerFullName,
+                            manager: projects[0].manager,
+                        }
+                    );
+                }
+
+                projects = projects.filter((project) => {
+
+                    const managerId = String(
+                        project.project_manager_id ||
+                        project.projectManagerId ||
+                        project.manager_id ||
+                        project.managerId ||
+                        project.assignedManagerId ||
+                        project.manager?.id ||
+                        project.manager?.user_id ||
+                        ""
+                    ).trim();
+
+                    const managerName = String(
+                        project.manager_name ||
+                        project.managerName ||
+                        project.manager_full_name ||
+                        project.managerFullName ||
+                        project.manager?.full_name ||
+                        project.manager?.fullName ||
+                        project.manager?.name ||
+                        ""
+                    ).trim().toLowerCase();
+
+                    // Match by ID (most reliable)
+                    if (userId && managerId && managerId === userId) {
+                        return true;
+                    }
+
+                    // Match by name (fallback if backend doesn't return manager ID)
+                    if (userName && managerName && managerName === userName) {
+                        return true;
+                    }
+
+                    return false;
+                });
+
+                console.log(
+                    `✅ Filtered to ${projects.length} project(s) for Project Manager ${userId}`
+                );
+            }
+
+            // =====================================================
             // FILTER BY STATUS
             // =====================================================
 
