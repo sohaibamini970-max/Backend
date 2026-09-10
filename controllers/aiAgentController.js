@@ -3259,7 +3259,6 @@ const buildActionMessage = (item) => {
     const result = item.result || {};
     const params = item.arguments || {};
 
-
     // ---------------------------------------------------------
     // PERMISSION DENIED
     // ---------------------------------------------------------
@@ -3268,13 +3267,11 @@ const buildActionMessage = (item) => {
         return `❌ ${item.error}`;
     }
 
-
     // ---------------------------------------------------------
     // FAILED
     // ---------------------------------------------------------
 
     if (!item.success) {
-
         const error =
             result?.error ||
             result?.message ||
@@ -3284,13 +3281,11 @@ const buildActionMessage = (item) => {
         return `❌ ${error}`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // CREATE PROJECT
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "createProject") {
-
         const projectName =
             result?.project?.name ||
             result?.name ||
@@ -3300,66 +3295,11 @@ const buildActionMessage = (item) => {
         return `✅ Project "${projectName}" was created successfully.`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // CREATE TASK
-    // ---------------------------------------------------------
-
-    // ---------------------------------------------------------
-// GET PROJECTS
-// ---------------------------------------------------------
-
-if (functionName === "getProjects") {
-
-    const projects =
-        result?.projects ||
-        result?.data?.projects ||
-        (Array.isArray(result) ? result : []);
-
-    if (!projects || projects.length === 0) {
-        return "ℹ️ No projects were found matching your request.";
-    }
-
-    let message = `📋 Found ${projects.length} project(s):\n\n`;
-
-    projects.forEach((project, index) => {
-
-        message += `${index + 1}. ${project.name || "Unnamed Project"}\n`;
-
-        if (project.domain) {
-            message += `   • Domain: ${project.domain}\n`;
-        }
-
-        if (project.status) {
-            message += `   • Status: ${project.status}\n`;
-        }
-
-        if (project.priority) {
-            message += `   • Priority: ${project.priority}\n`;
-        }
-
-        if (project.startDate) {
-            const start = new Date(project.startDate);
-            message += `   • Start Date: ${start.toISOString().split('T')[0]}\n`;
-        }
-
-        if (project.deadline) {
-            const deadline = new Date(project.deadline);
-            message += `   • Deadline: ${deadline.toISOString().split('T')[0]}\n`;
-        }
-
-        if (project.managerName || project.managerFullName) {
-            message += `   • Manager: ${project.managerName || project.managerFullName}\n`;
-        }
-
-        message += `\n`;
-    });
-
-    return message.trim();
-}
+    // =========================================================
 
     if (functionName === "createTask") {
-
         const taskName =
             result?.task?.name ||
             result?.name ||
@@ -3372,25 +3312,148 @@ if (functionName === "getProjects") {
             params.projectName;
 
         if (projectName) {
-
-            return (
-                `✅ Task "${taskName}" was created successfully ` +
-                `under project "${projectName}".`
-            );
+            return `✅ Task "${taskName}" was created successfully under project "${projectName}".`;
         }
 
-        return (
-            `✅ Task "${taskName}" was created successfully.`
-        );
+        return `✅ Task "${taskName}" was created successfully.`;
     }
 
+    // =========================================================
+    // GET PROJECTS
+    // =========================================================
 
-    // ---------------------------------------------------------
+    if (functionName === "getProjects") {
+
+        const projects =
+            result?.projects ||
+            result?.data?.projects ||
+            (Array.isArray(result) ? result : []);
+
+        if (!projects || projects.length === 0) {
+            return "ℹ️ No projects were found matching your request.";
+        }
+
+        let message = `📋 Found ${projects.length} project(s):\n\n`;
+
+        projects.forEach((project, index) => {
+
+            message += `${index + 1}. ${project.name || project.projectName || "Unnamed Project"}\n`;
+
+            if (project.domain) {
+                message += `   • Domain: ${project.domain}\n`;
+            }
+
+            if (project.status) {
+                message += `   • Status: ${project.status}\n`;
+            }
+
+            if (project.priority) {
+                message += `   • Priority: ${project.priority}\n`;
+            }
+
+            const startDate = project.startDate || project.start_date;
+            if (startDate) {
+                const start = new Date(startDate);
+                if (!Number.isNaN(start.getTime())) {
+                    message += `   • Start Date: ${start.toISOString().split("T")[0]}\n`;
+                }
+            }
+
+            const deadline = project.deadline || project.dueDate || project.due_date;
+            if (deadline) {
+                const end = new Date(deadline);
+                if (!Number.isNaN(end.getTime())) {
+                    message += `   • Deadline: ${end.toISOString().split("T")[0]}\n`;
+                }
+            }
+
+            const manager =
+                project.managerName ||
+                project.managerFullName ||
+                project.manager_name;
+            if (manager) {
+                message += `   • Manager: ${manager}\n`;
+            }
+
+            message += `\n`;
+        });
+
+        return message.trim();
+    }
+
+    // =========================================================
+    // GET TASKS
+    // =========================================================
+
+    if (functionName === "getTasks") {
+
+        const tasks =
+            result?.tasks ||
+            result?.data?.tasks ||
+            (Array.isArray(result) ? result : []);
+
+        if (!tasks || tasks.length === 0) {
+            return "ℹ️ No tasks were found matching your request.";
+        }
+
+        let message = `📋 Found ${tasks.length} task(s):\n\n`;
+
+        tasks.forEach((task, index) => {
+
+            message += `${index + 1}. ${task.name || task.taskName || "Unnamed Task"}\n`;
+
+            const projectName =
+                task.project_name ||
+                task.projectName ||
+                task.project?.name;
+            if (projectName) {
+                message += `   • Project: ${projectName}\n`;
+            }
+
+            if (task.status) {
+                message += `   • Status: ${task.status}\n`;
+            }
+
+            if (task.priority) {
+                message += `   • Priority: ${task.priority}\n`;
+            }
+
+            const assignee =
+                task.assignee_name ||
+                task.assigneeName ||
+                task.assignee?.full_name ||
+                task.assignee?.fullName;
+            if (assignee) {
+                message += `   • Assignee: ${assignee}\n`;
+            }
+
+            const startDate = task.start_date || task.startDate;
+            if (startDate) {
+                const start = new Date(startDate);
+                if (!Number.isNaN(start.getTime())) {
+                    message += `   • Start Date: ${start.toISOString().split("T")[0]}\n`;
+                }
+            }
+
+            const dueDate = task.due_date || task.dueDate;
+            if (dueDate) {
+                const due = new Date(dueDate);
+                if (!Number.isNaN(due.getTime())) {
+                    message += `   • Due Date: ${due.toISOString().split("T")[0]}\n`;
+                }
+            }
+
+            message += `\n`;
+        });
+
+        return message.trim();
+    }
+
+    // =========================================================
     // ASSIGN PROJECT
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "assignProject") {
-
         const projectName =
             result?.projectName ||
             params.projectName ||
@@ -3401,19 +3464,14 @@ if (functionName === "getProjects") {
             params.managerName ||
             "the Project Manager";
 
-        return (
-            `✅ Project "${projectName}" was successfully ` +
-            `assigned to Project Manager "${managerName}".`
-        );
+        return `✅ Project "${projectName}" was successfully assigned to Project Manager "${managerName}".`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // ASSIGN TASK
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "assignTask") {
-
         const taskName =
             result?.taskName ||
             params.taskName ||
@@ -3424,19 +3482,14 @@ if (functionName === "getProjects") {
             params.assigneeName ||
             "the Member";
 
-        return (
-            `✅ Task "${taskName}" was successfully ` +
-            `assigned to Member "${assigneeName}".`
-        );
+        return `✅ Task "${taskName}" was successfully assigned to Member "${assigneeName}".`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // UPDATE TASK STATUS
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "updateTaskStatus") {
-
         const taskName =
             result?.taskName ||
             params.taskName ||
@@ -3448,59 +3501,53 @@ if (functionName === "getProjects") {
             params.status ||
             "the requested status";
 
-        return (
-            `✅ Task "${taskName}" status was successfully ` +
-            `updated to "${status}".`
-        );
+        return `✅ Task "${taskName}" status was successfully updated to "${status}".`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // DELETE TASK
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "deleteTask") {
-
         const taskName =
             result?.taskName ||
             params.taskName ||
             params.taskId ||
             "the task";
 
-        return (
-            `✅ Task "${taskName}" was successfully deleted.`
-        );
+        return `✅ Task "${taskName}" was successfully deleted.`;
     }
 
-
-    // ---------------------------------------------------------
+    // =========================================================
     // SUBMIT WORK
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "submitWork") {
-
         const taskName =
             result?.taskName ||
             params.taskName ||
             params.taskId ||
             "the task";
 
-        return (
-            `✅ Your work submission for "${taskName}" ` +
-            `was submitted successfully.`
-        );
+        return `✅ Your work submission for "${taskName}" was submitted successfully.`;
     }
 
-    // In the buildActionMessage function, add this case
-
-    // ---------------------------------------------------------
+    // =========================================================
     // ASSIGN ALL PROJECT TASKS
-    // ---------------------------------------------------------
+    // =========================================================
 
     if (functionName === "assignAllProjectTasks") {
 
-        const projectName = result?.projectName || params.projectName || "the project";
-        const assigneeName = result?.assigneeName || params.assigneeName || "the Member";
+        const projectName =
+            result?.projectName ||
+            params.projectName ||
+            "the project";
+
+        const assigneeName =
+            result?.assigneeName ||
+            params.assigneeName ||
+            "the Member";
+
         const totalTasks = result?.totalTasks || 0;
         const succeeded = result?.succeeded || 0;
         const failed = result?.failed || 0;
@@ -3520,12 +3567,84 @@ if (functionName === "getProjects") {
         return `❌ Failed to assign tasks from "${projectName}" to ${assigneeName}.`;
     }
 
+    // =========================================================
+    // GET USERS
+    // =========================================================
 
-    // ---------------------------------------------------------
+    if (functionName === "getUsers") {
+
+        const users =
+            result?.users ||
+            result?.data?.users ||
+            (Array.isArray(result) ? result : []);
+
+        if (!users || users.length === 0) {
+            return "ℹ️ No users were found.";
+        }
+
+        let message = `👥 Found ${users.length} user(s):\n\n`;
+
+        users.forEach((u, index) => {
+            message += `${index + 1}. ${u.full_name || u.fullName || u.name || "Unnamed User"}`;
+            if (u.role) message += ` — ${u.role}`;
+            if (u.email) message += ` (${u.email})`;
+            message += `\n`;
+        });
+
+        return message.trim();
+    }
+
+    // =========================================================
+    // GET PROJECT MANAGERS
+    // =========================================================
+
+    if (functionName === "getProjectManagers") {
+
+        const managers =
+            result?.projectManagers ||
+            result?.managers ||
+            result?.users ||
+            (Array.isArray(result) ? result : []);
+
+        if (!managers || managers.length === 0) {
+            return "ℹ️ No Project Managers were found.";
+        }
+
+        let message = `👥 Found ${managers.length} Project Manager(s):\n\n`;
+
+        managers.forEach((m, index) => {
+            message += `${index + 1}. ${m.full_name || m.fullName || m.name || "Unnamed Manager"}`;
+            if (m.email) message += ` (${m.email})`;
+            message += `\n`;
+        });
+
+        return message.trim();
+    }
+
+    // =========================================================
+    // UPDATE PROJECT
+    // =========================================================
+
+    if (functionName === "updateProject") {
+        const projectName =
+            result?.projectName ||
+            result?.project?.name ||
+            params.projectName ||
+            params.name ||
+            "the project";
+
+        return `✅ Project "${projectName}" was updated successfully.`;
+    }
+
+    // =========================================================
     // FALLBACK
-    // ---------------------------------------------------------
+    // =========================================================
 
-    return "✅ The requested operation was completed successfully.";
+    console.warn(
+        `⚠️ No message formatter for function: ${functionName}`
+    );
+
+    return `✅ Operation "${functionName}" completed. (No custom summary available.)`;
 };
 
 const generateMultiActionResponse = async (
@@ -4440,12 +4559,118 @@ Gets real tasks available to the current user.
 
 Use this when:
 - finding tasks
+- listing tasks
+- showing tasks
 - resolving a task by name
 - resolving duplicate task names
 - assigning a task
 - checking task information
 
-Never invent task IDs or task information.
+=========================================================
+TASK LISTING INTELLIGENCE
+=========================================================
+
+When the user asks for tasks, ALWAYS use getTasks.
+
+Never answer task-listing requests from memory.
+
+Understand many natural-language variations:
+
+"show tasks"
+"list tasks"
+"give me tasks"
+"bring tasks"
+"what tasks do we have"
+"show me all tasks"
+
+Return:
+
+[FUNCTION:getTasks]{}
+
+---------------------------------------------------------
+
+TASKS IN A SPECIFIC PROJECT
+
+Examples:
+
+"list Arg People Intelligence project tasks"
+"show me tasks for Arg People Intelligence"
+"tasks in Arg People Intelligence"
+"bring tasks from Arg People Intelligence project"
+"list down tasks under Arg People Intelligence"
+"what tasks does Arg People Intelligence have"
+"give me tasks of the Arg People Intelligence project"
+
+Interpret as:
+
+projectName = "Arg People Intelligence"
+
+Return:
+
+[FUNCTION:getTasks]{"projectName":"Arg People Intelligence"}
+
+If the user provides the project name with the word "project" at the end:
+
+"Arg People Intelligence project tasks"
+
+Interpret as:
+
+projectName = "Arg People Intelligence"
+
+(Do NOT include the word "project" in the projectName unless the actual project name includes it.)
+
+For example:
+
+"Healthcare Patient Portal Project tasks"
+
+projectName = "Healthcare Patient Portal Project"
+
+Because in this case "Project" is part of the actual name.
+
+Use your judgment: if the phrase "X Project" sounds like a real project name, keep it. If "X" is the real name and "Project" is just a descriptor, drop it.
+
+When uncertain, prefer to include the word as the user wrote it.
+
+---------------------------------------------------------
+
+TASKS ASSIGNED TO A PERSON
+
+Examples:
+
+"show tasks assigned to Tony Stark"
+"list Tony Stark's tasks"
+"what is Tony Stark working on"
+"tasks for Ahmed"
+
+Return:
+
+[FUNCTION:getTasks]{"assigneeName":"Tony Stark"}
+
+---------------------------------------------------------
+
+TASKS BY STATUS
+
+"pending tasks"       → [FUNCTION:getTasks]{"status":"To Do"}
+"in progress tasks"   → [FUNCTION:getTasks]{"status":"In Progress"}
+"completed tasks"     → [FUNCTION:getTasks]{"status":"Completed"}
+"done tasks"          → [FUNCTION:getTasks]{"status":"Done"}
+
+---------------------------------------------------------
+
+COMBINED FILTERS
+
+"show high priority tasks for Arg People Intelligence"
+
+Return:
+
+[FUNCTION:getTasks]{"projectName":"Arg People Intelligence","priority":"High"}
+
+IMPORTANT:
+
+- Never invent task records.
+- Always rely on the backend response.
+- If no tasks are found, state that clearly.
+- If many tasks are returned, present them cleanly with names, projects, status, priority, and assignee.
 
 =========================================================
 
