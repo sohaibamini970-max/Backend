@@ -24,16 +24,11 @@ const isManagementRole = async (userId) => {
 // SUBMISSION CONTROLLERS
 // ================================
 
-// Add a new submission link
 const addSubmission = async (req, res) => {
     try {
         const { taskId } = req.params;
         const userId = req.user.id;
         const { link, description } = req.body;
-
-        if (!link) {
-            return res.status(400).json({ error: 'Link is required' });
-        }
 
         // Verify task exists
         const taskResult = await pool.query(
@@ -48,40 +43,55 @@ const addSubmission = async (req, res) => {
         const task = taskResult.rows[0];
 
         // Only the assignee can submit work
-        if (task.assignee_id !== userId) {
-            return res.status(403).json({ 
-                error: 'Only the task assignee can submit work' 
+        if (String(task.assignee_id) !== String(userId)) {
+            return res.status(403).json({
+                error: 'Only the task assignee can submit work'
             });
         }
 
-        // Can't submit if task is already Done
         if (task.status === 'Done') {
-            return res.status(400).json({ 
-                error: 'Task is already marked as Done' 
+            return res.status(400).json({
+                error: 'Task is already marked as Done'
             });
         }
 
-        // Check if user is a Member (not management)
+        // Only Members can submit
         const userResult = await pool.query(
             'SELECT role FROM users WHERE id = $1',
             [userId]
         );
         const userRole = userResult.rows[0]?.role;
-        
-        if (!userRole || userRole !== 'Member') {
-            return res.status(403).json({ 
-                error: 'Only Members can submit work' 
+
+        if (userRole !== 'Member') {
+            return res.status(403).json({
+                error: 'Only Members can submit work'
             });
         }
 
-        // Insert submission
+        // =========================================================
+        // REQUIRE: at least one work part
+        // =========================================================
+        const partsCheck = await pool.query(
+            'SELECT COUNT(*)::int AS count FROM task_work_parts WHERE task_id = $1',
+            [taskId]
+        );
+
+        if (partsCheck.rows[0].count === 0) {
+            return res.status(400).json({
+                error: 'Please add at least one work part before submitting. Work parts describe what you did.'
+            });
+        }
+
+        // =========================================================
+        // Insert submission (link is now OPTIONAL)
+        // =========================================================
         const result = await pool.query(
             `INSERT INTO task_submissions (task_id, user_id, link, description, version)
-             VALUES ($1, $2, $3, $4, 
+             VALUES ($1, $2, $3, $4,
                  (SELECT COALESCE(MAX(version), 0) + 1 FROM task_submissions WHERE task_id = $1)
              )
              RETURNING *`,
-            [taskId, userId, link, description || null]
+            [taskId, userId, link || null, description || null]
         );
 
         // Update task status to "In Progress" if it was "To Do"
@@ -100,8 +110,8 @@ const addSubmission = async (req, res) => {
 
     } catch (error) {
         console.error('Add submission error:', error);
-        res.status(500).json({ 
-            error: error.message || 'Failed to add submission' 
+        res.status(500).json({
+            error: error.message || 'Failed to add submission'
         });
     }
 };
