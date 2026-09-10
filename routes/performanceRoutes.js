@@ -8,13 +8,20 @@ const {
     getPerformanceTrends,
     createPerformanceSnapshot,
     getTaskHistory,
+    getAllMembersPerformance,
+    getMembersList,
 } = require("../controllers/performanceController");
+
+// ... existing routes ...
+
 const { authenticate } = require("../middleware/authMiddleware");
 
 /* =========================================================
    PERFORMANCE ROUTES
 ========================================================= */
 
+router.get("/all", authenticateToken, getAllMembersPerformance);
+router.get("/members-list", authenticateToken, getMembersList);
 
 // ... existing routes ...
 
