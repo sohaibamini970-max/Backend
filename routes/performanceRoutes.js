@@ -20,8 +20,8 @@ const { authenticate } = require("../middleware/authMiddleware");
    PERFORMANCE ROUTES
 ========================================================= */
 
-router.get("/all", authenticateToken, getAllMembersPerformance);
-router.get("/members-list", authenticateToken, getMembersList);
+router.get("/all", authenticate, getAllMembersPerformance);
+router.get("/members-list", authenticate, getMembersList);
 
 // ... existing routes ...
 
