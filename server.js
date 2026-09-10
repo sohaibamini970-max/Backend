@@ -14,6 +14,9 @@ const taskAttachmentRoutes = require("./routes/taskattachmentroutes");
 const dashboardRoutes = require("./routes/dashboardroutes");
 const taskSubmissionRoutes = require('./routes/tasksubmissionroutes');
 const aiAgentRoutes = require('./routes/aiAgentRoutes');
+const performanceRoutes = require("./routes/performanceRoutes");
+
+
 
 const app = express();
 
@@ -95,6 +98,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/challenges", challengeRoutes);
 app.use("/api", taskAttachmentRoutes);
 app.use('/api', taskSubmissionRoutes);
+app.use("/api/performance", performanceRoutes);
 
 // ============================================================
 // 404 HANDLER
