@@ -452,20 +452,110 @@ const updateTask = async (req, res) => {
    PATCH /api/tasks/:taskId/status
 ========================================================= */
 
+/* =========================================================
+   UPDATE TASK STATUS
+   PATCH /api/tasks/:taskId/status
+========================================================= */
+
 const updateTaskStatus = async (req, res) => {
     try {
         const { taskId } = req.params;
         const { status } = req.body;
+        const userId = req.user?.id;
+        const userRole = req.user?.role;
 
-        console.log('🔍 Updating task status:', { taskId, status, user: req.user?.id });
+        console.log('🔍 Updating task status:', { taskId, status, user: userId, role: userRole });
 
-        if (!["To Do", "In Progress", "Done", "Backlog"].includes(status)) {
+        // =========================================================
+        // VALIDATE STATUS
+        // =========================================================
+        if (!["To Do", "In Progress", "Completed", "Done", "Backlog"].includes(status)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid status. Must be 'To Do', 'In Progress', 'Done', or 'Backlog'."
+                message: "Invalid status. Must be 'To Do', 'In Progress', 'Completed', 'Done', or 'Backlog'."
             });
         }
 
+        // =========================================================
+        // GET CURRENT TASK
+        // =========================================================
+        const taskResult = await safeQuery(
+            `SELECT id, status, assignee_id, name FROM tasks WHERE id = $1`,
+            [taskId]
+        );
+
+        if (taskResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Task not found."
+            });
+        }
+
+        const currentTask = taskResult.rows[0];
+        const currentStatus = currentTask.status;
+
+        // =========================================================
+        // ROLE-BASED RULES
+        // =========================================================
+
+        // ---------------------------------------------------------
+        // MEMBERS
+        // Members can only set: "To Do" (revert), "In Progress", "Completed"
+        // Members CANNOT set: "Done" or "Backlog"
+        // ---------------------------------------------------------
+        if (userRole === "Member") {
+            if (status === "Done") {
+                return res.status(403).json({
+                    success: false,
+                    message: "Members cannot mark tasks as Done. Please mark the task as Completed and the Project Manager will review it."
+                });
+            }
+
+            if (status === "Backlog") {
+                return res.status(403).json({
+                    success: false,
+                    message: "Members cannot move tasks to Backlog."
+                });
+            }
+
+            // Members can only update their own assigned tasks
+            if (String(currentTask.assignee_id) !== String(userId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You can only update the status of tasks assigned to you."
+                });
+            }
+
+            // Block reverting from Completed back to To Do (optional safety)
+            if (currentStatus === "Completed" && status === "To Do") {
+                return res.status(403).json({
+                    success: false,
+                    message: "You cannot move a Completed task back to To Do. Please contact your Project Manager."
+                });
+            }
+        }
+
+        // ---------------------------------------------------------
+        // PROJECT MANAGER / EXECUTIVE MANAGER / SYSTEM ADMINISTRATOR
+        // Can set: "To Do", "In Progress", "Backlog"
+        // Can set "Done" ONLY if current status is "Completed"
+        // ---------------------------------------------------------
+        if (
+            userRole === "Project Manager" ||
+            userRole === "Executive Manager" ||
+            userRole === "System Administrator"
+        ) {
+            if (status === "Done" && currentStatus !== "Completed") {
+                return res.status(400).json({
+                    success: false,
+                    message: "This task cannot be marked as Done yet. The assigned Member must first mark it as Completed."
+                });
+            }
+        }
+
+        // =========================================================
+        // UPDATE STATUS
+        // =========================================================
         const result = await safeQuery(
             `
             UPDATE tasks 
@@ -498,7 +588,7 @@ const updateTaskStatus = async (req, res) => {
             }
         }
 
-        console.log('✅ Task status updated:', taskId, 'to', status);
+        console.log('✅ Task status updated:', taskId, 'from', currentStatus, 'to', status);
 
         return res.status(200).json({
             success: true,
@@ -816,8 +906,9 @@ const getMyTasks = async (req, res) => {
                 CASE 
                     WHEN t.status = 'To Do' THEN 1
                     WHEN t.status = 'In Progress' THEN 2
-                    WHEN t.status = 'Done' THEN 3
-                    ELSE 4
+                    WHEN t.status = 'Completed' THEN 3
+                    WHEN t.status = 'Done' THEN 4
+                    ELSE 5
                 END,
                 t.due_date ASC NULLS LAST,
                 t.created_at DESC
@@ -844,7 +935,6 @@ const getMyTasks = async (req, res) => {
         });
     }
 };
-
 /* =========================================================
    GET MY PROJECTS
    GET /api/tasks/my/projects
@@ -914,11 +1004,13 @@ const getTaskStats = async (req, res) => {
                 COUNT(*) as total_tasks,
                 COUNT(CASE WHEN status = 'To Do' THEN 1 END) as todo,
                 COUNT(CASE WHEN status = 'In Progress' THEN 1 END) as in_progress,
+                COUNT(CASE WHEN status = 'Completed' THEN 1 END) as completed,
                 COUNT(CASE WHEN status = 'Done' THEN 1 END) as done,
                 COUNT(CASE WHEN status = 'Backlog' THEN 1 END) as backlog,
                 COUNT(CASE WHEN assignee_id = $1 THEN 1 END) as assigned_to_me,
                 COUNT(CASE WHEN assignee_id = $1 AND status = 'To Do' THEN 1 END) as my_todo,
                 COUNT(CASE WHEN assignee_id = $1 AND status = 'In Progress' THEN 1 END) as my_in_progress,
+                COUNT(CASE WHEN assignee_id = $1 AND status = 'Completed' THEN 1 END) as my_completed,
                 COUNT(CASE WHEN assignee_id = $1 AND status = 'Done' THEN 1 END) as my_done
             FROM tasks
             `,
