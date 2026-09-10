@@ -17,13 +17,6 @@ const {
   getMyProjects
 } = require("../controllers/taskcontroller");
 
-const {
-  createWorkPart,
-  getWorkParts,
-  updateWorkPartStatus,
-  deleteWorkPart
-} = require("../controllers/taskWorkPartController");
-
 // =========================================================
 // 1. SPECIFIC / NAMED ROUTES (must come first)
 // =========================================================
@@ -39,16 +32,6 @@ router.get("/my/projects", authenticate, getMyProjects);
 
 // Get all tasks for a project
 router.get("/project/:projectId", authenticate, getProjectTasks);
-
-// =========================================================
-// 2. WORK PARTS (specific, before /:taskId)
-// =========================================================
-
-router.post("/:taskId/work-parts", authenticate, createWorkPart);
-router.get("/:taskId/work-parts", authenticate, getWorkParts);
-router.patch("/work-parts/:workPartId/status", authenticate, updateWorkPartStatus);
-router.delete("/work-parts/:workPartId", authenticate, deleteWorkPart);
-
 // =========================================================
 // 3. TASK-SCOPED ROUTES
 // =========================================================
