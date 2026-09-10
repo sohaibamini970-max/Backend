@@ -1,18 +1,24 @@
 // routes/performanceRoutes.js
 const express = require("express");
 const router = express.Router();
+
 const {
     getMemberPerformance,
     getTeamPerformance,
     getPerformanceTrends,
-    createPerformanceSnapshot
+    createPerformanceSnapshot,
+    getTaskHistory,
 } = require("../controllers/performanceController");
-
 const { authenticate } = require("../middleware/authMiddleware");
 
 /* =========================================================
    PERFORMANCE ROUTES
 ========================================================= */
+
+
+// ... existing routes ...
+
+router.get("/history", authenticate, getTaskHistory);
 
 // Get performance for a specific member
 router.get("/member/:userId", authenticate, getMemberPerformance);
