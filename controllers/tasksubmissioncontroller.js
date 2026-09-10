@@ -279,15 +279,24 @@ const markTaskDone = async (req, res) => {
         // Check if user is management
         const isManager = await isManagementRole(userId);
         if (!isManager) {
-            return res.status(403).json({ 
-                error: 'Only managers can mark tasks as Done' 
+            return res.status(403).json({
+                error: 'Only managers can mark tasks as Done'
             });
         }
 
-        // Verify task exists and check submissions
+        // =========================================================
+        // GET TASK + COUNTS
+        // =========================================================
         const result = await pool.query(
-            `SELECT t.id, t.status, 
-                (SELECT COUNT(*) FROM task_submissions WHERE task_id = t.id) as submission_count
+            `SELECT 
+                t.id, 
+                t.status,
+                (SELECT COUNT(*)::int FROM task_submissions WHERE task_id = t.id) AS submission_count,
+                (SELECT COUNT(*)::int FROM task_submissions 
+                 WHERE task_id = t.id AND link IS NOT NULL AND TRIM(link) <> '') AS link_count,
+                (SELECT COUNT(*)::int FROM task_work_parts WHERE task_id = t.id) AS part_count,
+                (SELECT COUNT(*)::int FROM task_work_parts 
+                 WHERE task_id = t.id AND status = 'Done') AS done_part_count
              FROM tasks t
              WHERE t.id = $1`,
             [taskId]
@@ -300,22 +309,35 @@ const markTaskDone = async (req, res) => {
         const task = result.rows[0];
 
         // =========================================================
-        // NEW: Task must be "Completed" first
+        // NEW RULE 1: Task must be "Completed" first
         // =========================================================
         if (task.status !== 'Completed') {
-            return res.status(400).json({ 
-                error: 'Task must be marked as Completed by the assigned Member before it can be marked Done.' 
+            return res.status(400).json({
+                error: 'Task must be marked as Completed by the assigned Member before it can be marked Done.'
             });
         }
 
-        // Check if task has at least one submission
-        if (parseInt(task.submission_count) === 0) {
-            return res.status(400).json({ 
-                error: 'Task cannot be marked as Done until at least one work submission link is provided' 
+        // =========================================================
+        // NEW RULE 2: At least one work part must exist
+        // =========================================================
+        if (task.part_count === 0) {
+            return res.status(400).json({
+                error: 'Task cannot be marked as Done until at least one work part has been added.'
             });
         }
 
-        // Update task status
+        // =========================================================
+        // NEW RULE 3: Either a work part is Done OR a link is provided
+        // =========================================================
+        if (task.done_part_count === 0 && task.link_count === 0) {
+            return res.status(400).json({
+                error: 'Task cannot be marked as Done until at least one work part is marked Done, or at least one work submission link is provided.'
+            });
+        }
+
+        // =========================================================
+        // ALL CHECKS PASSED → UPDATE
+        // =========================================================
         await pool.query(
             'UPDATE tasks SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
             ['Done', taskId]
@@ -328,8 +350,8 @@ const markTaskDone = async (req, res) => {
 
     } catch (error) {
         console.error('Mark task done error:', error);
-        res.status(500).json({ 
-            error: error.message || 'Failed to mark task as Done' 
+        res.status(500).json({
+            error: error.message || 'Failed to mark task as Done'
         });
     }
 };
