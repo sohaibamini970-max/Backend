@@ -99,6 +99,8 @@ app.use("/api/challenges", challengeRoutes);
 app.use("/api", taskAttachmentRoutes);
 app.use('/api', taskSubmissionRoutes);
 app.use("/api/performance", performanceRoutes);
+// Add near your other route mounts
+app.use("/api/programs", require("./routes/programRoutes"));
 
 // ============================================================
 // 404 HANDLER
