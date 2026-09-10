@@ -15,7 +15,7 @@ const dashboardRoutes = require("./routes/dashboardroutes");
 const taskSubmissionRoutes = require('./routes/tasksubmissionroutes');
 const aiAgentRoutes = require('./routes/aiAgentRoutes');
 const performanceRoutes = require("./routes/performanceRoutes");
-
+const taskWorkPartRoutes = require('./routes/taskworkpartroutes');
 
 
 const app = express();
@@ -101,6 +101,7 @@ app.use('/api', taskSubmissionRoutes);
 app.use("/api/performance", performanceRoutes);
 // Add near your other route mounts
 app.use("/api/programs", require("./routes/programRoutes"));
+app.use('/api', taskWorkPartRoutes);
 
 // ============================================================
 // 404 HANDLER
