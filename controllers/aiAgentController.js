@@ -3305,6 +3305,59 @@ const buildActionMessage = (item) => {
     // CREATE TASK
     // ---------------------------------------------------------
 
+    // ---------------------------------------------------------
+// GET PROJECTS
+// ---------------------------------------------------------
+
+if (functionName === "getProjects") {
+
+    const projects =
+        result?.projects ||
+        result?.data?.projects ||
+        (Array.isArray(result) ? result : []);
+
+    if (!projects || projects.length === 0) {
+        return "ℹ️ No projects were found matching your request.";
+    }
+
+    let message = `📋 Found ${projects.length} project(s):\n\n`;
+
+    projects.forEach((project, index) => {
+
+        message += `${index + 1}. ${project.name || "Unnamed Project"}\n`;
+
+        if (project.domain) {
+            message += `   • Domain: ${project.domain}\n`;
+        }
+
+        if (project.status) {
+            message += `   • Status: ${project.status}\n`;
+        }
+
+        if (project.priority) {
+            message += `   • Priority: ${project.priority}\n`;
+        }
+
+        if (project.startDate) {
+            const start = new Date(project.startDate);
+            message += `   • Start Date: ${start.toISOString().split('T')[0]}\n`;
+        }
+
+        if (project.deadline) {
+            const deadline = new Date(project.deadline);
+            message += `   • Deadline: ${deadline.toISOString().split('T')[0]}\n`;
+        }
+
+        if (project.managerName || project.managerFullName) {
+            message += `   • Manager: ${project.managerName || project.managerFullName}\n`;
+        }
+
+        message += `\n`;
+    });
+
+    return message.trim();
+}
+
     if (functionName === "createTask") {
 
         const taskName =
