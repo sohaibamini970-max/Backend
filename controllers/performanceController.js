@@ -525,9 +525,87 @@ const createPerformanceSnapshot = async (req, res) => {
     }
 };
 
+/* =========================================================
+   GET TASK HISTORY
+   GET /api/performance/history
+   - Member: their own tasks
+   - Manager/Admin: all tasks (optionally filtered by project)
+========================================================= */
+
+const getTaskHistory = async (req, res) => {
+    try {
+        const requestingUser = req.user;
+        const { limit = 50, userId } = req.query;
+
+        const isManagerOrAdmin = [
+            "Project Manager",
+            "Executive Manager",
+            "System Administrator",
+        ].includes(requestingUser.role);
+
+        let query = `
+            SELECT
+                t.id,
+                t.name,
+                t.status,
+                t.priority,
+                t.due_date,
+                t.completed_at,
+                t.updated_at,
+                t.created_at,
+                t.assignee_id,
+                u.full_name AS assignee_name,
+                p.name AS project_name
+            FROM tasks t
+            LEFT JOIN users u ON t.assignee_id = u.id
+            LEFT JOIN projects p ON t.project_id = p.id
+        `;
+
+        const params = [];
+        const conditions = [];
+
+        // Members: only their own tasks
+        if (!isManagerOrAdmin) {
+            conditions.push(`t.assignee_id = $${params.length + 1}`);
+            params.push(requestingUser.id);
+        } else if (userId) {
+            // Managers can optionally filter a specific member
+            conditions.push(`t.assignee_id = $${params.length + 1}`);
+            params.push(userId);
+        }
+
+        if (conditions.length > 0) {
+            query += ` WHERE ` + conditions.join(" AND ");
+        }
+
+        query += `
+            ORDER BY 
+                COALESCE(t.completed_at, t.updated_at, t.created_at) DESC
+            LIMIT $${params.length + 1}
+        `;
+        params.push(parseInt(limit));
+
+        const result = await safeQuery(query, params);
+
+        return res.status(200).json({
+            success: true,
+            history: result.rows,
+            count: result.rows.length,
+        });
+    } catch (error) {
+        console.error("❌ Get task history error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve task history.",
+            ...(process.env.NODE_ENV !== "production" && { error: error.message }),
+        });
+    }
+};
+
 module.exports = {
     getMemberPerformance,
     getTeamPerformance,
     getPerformanceTrends,
-    createPerformanceSnapshot
+    createPerformanceSnapshot,
+    getTaskHistory, 
 };
