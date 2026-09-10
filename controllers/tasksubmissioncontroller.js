@@ -289,6 +289,15 @@ const markTaskDone = async (req, res) => {
 
         const task = result.rows[0];
 
+        // =========================================================
+        // NEW: Task must be "Completed" first
+        // =========================================================
+        if (task.status !== 'Completed') {
+            return res.status(400).json({ 
+                error: 'Task must be marked as Completed by the assigned Member before it can be marked Done.' 
+            });
+        }
+
         // Check if task has at least one submission
         if (parseInt(task.submission_count) === 0) {
             return res.status(400).json({ 
