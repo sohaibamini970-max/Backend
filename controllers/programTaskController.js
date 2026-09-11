@@ -885,6 +885,255 @@ const deleteInstructionFile = async (req, res) => {
     }
 };
 
+/* =========================================================
+   ASSIGN MEMBERS TO PROGRAM PROJECT
+   POST /api/program-tasks/program-project/:id/members
+   body: { userIds: string[] }   (replaces the current set)
+========================================================= */
+
+const assignProgramProjectMembers = async (req, res) => {
+    try {
+        const { programProjectId } = req.params;
+        const { userIds } = req.body;
+
+        if (!isManagementRole(req.user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "Only managers can assign members.",
+            });
+        }
+
+        if (!Array.isArray(userIds)) {
+            return res.status(400).json({
+                success: false,
+                message: "userIds must be an array.",
+            });
+        }
+
+        const pp = await getProgramProject(programProjectId);
+        if (!pp) {
+            return res.status(404).json({
+                success: false,
+                message: "Program project not found.",
+            });
+        }
+
+        const allowed = await canManageProgramProject(req.user, pp);
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not the Project Manager for this program project.",
+            });
+        }
+
+        // Validate that every user is an active Member
+        if (userIds.length > 0) {
+            const check = await safeQuery(
+                `SELECT id, role FROM users WHERE id = ANY($1::uuid[]) AND is_active = TRUE`,
+                [userIds]
+            );
+            const invalid = check.rows.filter((u) => u.role !== "Member");
+            if (invalid.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Only Members can be assigned to program projects.",
+                });
+            }
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query("BEGIN");
+
+            await client.query(
+                `DELETE FROM program_project_members WHERE program_project_id = $1`,
+                [programProjectId]
+            );
+
+            if (userIds.length > 0) {
+                const values = userIds.map((_, i) => `($1, $${i + 2}, $${userIds.length + 2})`);
+                const params = [programProjectId, ...userIds, req.user.id];
+
+                await client.query(
+                    `INSERT INTO program_project_members (program_project_id, user_id, assigned_by)
+                     VALUES ${values.join(", ")}
+                     ON CONFLICT (program_project_id, user_id) DO NOTHING`,
+                    params
+                );
+            }
+
+            await client.query("COMMIT");
+        } catch (e) {
+            await client.query("ROLLBACK");
+            throw e;
+        } finally {
+            client.release();
+        }
+
+        return res.status(200).json({ success: true, message: "Members updated." });
+    } catch (error) {
+        console.error("Assign program project members error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to assign members.",
+        });
+    }
+};
+
+/* =========================================================
+   GET MEMBERS OF PROGRAM PROJECT
+   GET /api/program-tasks/program-project/:id/members
+========================================================= */
+
+const getProgramProjectMembers = async (req, res) => {
+    try {
+        const { programProjectId } = req.params;
+
+        const pp = await getProgramProject(programProjectId);
+        if (!pp) {
+            return res.status(404).json({
+                success: false,
+                message: "Program project not found.",
+            });
+        }
+
+        const r = await safeQuery(
+            `
+            SELECT
+                ppm.id,
+                ppm.user_id,
+                ppm.assigned_at,
+                u.full_name,
+                u.email,
+                u.role,
+                u.job_title
+            FROM program_project_members ppm
+            JOIN users u ON u.id = ppm.user_id
+            WHERE ppm.program_project_id = $1
+            ORDER BY u.full_name ASC
+            `,
+            [programProjectId]
+        );
+
+        return res.status(200).json({ success: true, members: r.rows });
+    } catch (error) {
+        console.error("Get program project members error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load members.",
+        });
+    }
+};
+
+/* =========================================================
+   MEMBER: MY PROGRAM PROJECTS
+   GET /api/program-tasks/my/program-projects
+========================================================= */
+
+const getMyProgramProjects = async (req, res) => {
+    try {
+        const r = await safeQuery(
+            `
+            SELECT
+                pp.*,
+                pg.name AS program_name,
+                pm.full_name AS assigned_to_name,
+                (
+                    SELECT COUNT(*)::int
+                    FROM program_project_tasks
+                    WHERE program_project_id = pp.id
+                ) AS task_count,
+                (
+                    SELECT COUNT(*)::int
+                    FROM program_project_tasks
+                    WHERE program_project_id = pp.id AND status = 'Done'
+                ) AS completed_task_count,
+                (
+                    SELECT COUNT(*)::int
+                    FROM program_project_tasks
+                    WHERE program_project_id = pp.id AND assignee_id = $1
+                ) AS my_task_count,
+                (
+                    SELECT COUNT(*)::int
+                    FROM program_project_tasks
+                    WHERE program_project_id = pp.id
+                      AND assignee_id = $1
+                      AND status = 'Done'
+                ) AS my_completed_task_count
+            FROM program_project_members ppm
+            JOIN program_projects pp ON pp.id = ppm.program_project_id
+            LEFT JOIN programs pg ON pg.id = pp.program_id
+            LEFT JOIN users pm ON pm.id = pp.assigned_to
+            WHERE ppm.user_id = $1
+            ORDER BY pp.created_at DESC
+            `,
+            [req.user.id]
+        );
+
+        return res.status(200).json({
+            success: true,
+            programProjects: r.rows,
+        });
+    } catch (error) {
+        console.error("Get my program projects error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load your program projects.",
+        });
+    }
+};
+
+/* =========================================================
+   MEMBER: TASKS I CAN SEE INSIDE A PROGRAM PROJECT I'M IN
+   GET /api/program-tasks/my/program-project/:id/tasks
+========================================================= */
+
+const getMyProgramProjectTasks = async (req, res) => {
+    try {
+        const { programProjectId } = req.params;
+
+        // Confirm the requester is a member of this program project
+        const membership = await safeQuery(
+            `SELECT 1 FROM program_project_members
+             WHERE program_project_id = $1 AND user_id = $2`,
+            [programProjectId, req.user.id]
+        );
+
+        if (membership.rows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not a member of this program project.",
+            });
+        }
+
+        const r = await safeQuery(
+            `
+            SELECT
+                t.*,
+                u.full_name AS assignee_name,
+                u.email AS assignee_email,
+                pp.name AS program_project_name,
+                pg.name AS program_name
+            FROM program_project_tasks t
+            LEFT JOIN users u ON u.id = t.assignee_id
+            LEFT JOIN program_projects pp ON pp.id = t.program_project_id
+            LEFT JOIN programs pg ON pg.id = pp.program_id
+            WHERE t.program_project_id = $1
+            ORDER BY t.created_at DESC
+            `,
+            [programProjectId]
+        );
+
+        return res.status(200).json({ success: true, tasks: r.rows });
+    } catch (error) {
+        console.error("Get my program project tasks error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load tasks.",
+        });
+    }
+};
+
 module.exports = {
     createProgramTask,
     getProgramProjectTasks,
@@ -900,4 +1149,8 @@ module.exports = {
     downloadInstructionFile,
     previewInstructionFile,
     deleteInstructionFile,
+    assignProgramProjectMembers,
+    getProgramProjectMembers,
+    getMyProgramProjects,
+    getMyProgramProjectTasks,
 };
