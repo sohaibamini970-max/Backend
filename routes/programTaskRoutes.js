@@ -37,6 +37,10 @@ const {
     getProgramTaskSubmissions,
     createProgramTaskSubmission,
     deleteProgramTaskSubmission,
+    assignProgramProjectMembers,
+    getProgramProjectMembers,
+    getMyProgramProjects,
+    getMyProgramProjectTasks,
 } = require("../controllers/programTaskChildControllers");
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -53,6 +57,14 @@ router.get("/:taskId", authenticate, getProgramTaskById);
 router.patch("/:taskId/status", authenticate, updateProgramTaskStatus);
 router.patch("/:taskId/mark-done", authenticate, markProgramTaskDone);
 router.delete("/:taskId", authenticate, deleteProgramTask);
+
+// Members management
+router.post("/program-project/:programProjectId/members", authenticate, assignProgramProjectMembers);
+router.get("/program-project/:programProjectId/members", authenticate, getProgramProjectMembers);
+
+// Member self-service
+router.get("/my/program-projects", authenticate, getMyProgramProjects);
+router.get("/my/program-project/:programProjectId/tasks", authenticate, getMyProgramProjectTasks);
 
 /* =========================================================
    INSTRUCTION FILES
