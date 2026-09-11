@@ -66,6 +66,14 @@ const canManageProgramProject = async (user, programProject) => {
    POST /api/program-tasks/program-project/:programProjectId
 ========================================================= */
 
+/* =========================================================
+   CREATE PROGRAM TASK
+   POST /api/program-tasks/program-project/:programProjectId
+   - Managers: full create, can assign to any Member
+   - Members: allowed only if they belong to the program project,
+              and the task is auto-assigned to themselves
+========================================================= */
+
 const createProgramTask = async (req, res) => {
     try {
         const { programProjectId } = req.params;
@@ -80,13 +88,9 @@ const createProgramTask = async (req, res) => {
             dueDate,
         } = req.body;
 
-        if (!isManagementRole(req.user.role)) {
-            return res.status(403).json({
-                success: false,
-                message: "Only managers can create program tasks.",
-            });
-        }
-
+        /* ---------------------------------------------------------
+           1. Validate task name
+        --------------------------------------------------------- */
         if (!name || !name.trim()) {
             return res.status(400).json({
                 success: false,
@@ -94,6 +98,9 @@ const createProgramTask = async (req, res) => {
             });
         }
 
+        /* ---------------------------------------------------------
+           2. Confirm program project exists
+        --------------------------------------------------------- */
         const programProject = await getProgramProject(programProjectId);
         if (!programProject) {
             return res.status(404).json({
@@ -102,19 +109,56 @@ const createProgramTask = async (req, res) => {
             });
         }
 
-        const allowed = await canManageProgramProject(req.user, programProject);
-        if (!allowed) {
-            return res.status(403).json({
-                success: false,
-                message: "You are not the Project Manager for this program project.",
-            });
+        /* ---------------------------------------------------------
+           3. Authorization
+              - Manager: must own the program project
+              - Member: must be a member of the program project
+        --------------------------------------------------------- */
+        const isManager = isManagementRole(req.user.role);
+
+        let finalAssigneeId = assigneeId || null;
+
+        if (isManager) {
+            // Manager path — same as before
+            const allowed = await canManageProgramProject(
+                req.user,
+                programProject
+            );
+            if (!allowed) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not the Project Manager for this program project.",
+                });
+            }
+        } else {
+            // Member path — must be an assigned member
+            const memCheck = await safeQuery(
+                `SELECT 1 FROM program_project_members
+                 WHERE program_project_id = $1 AND user_id = $2`,
+                [programProjectId, req.user.id]
+            );
+
+            if (memCheck.rows.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You must be a member of this program project to create tasks.",
+                });
+            }
+
+            // Member-created tasks are always assigned to themselves.
+            // Any assigneeId sent by the client is ignored.
+            finalAssigneeId = req.user.id;
         }
 
-        // Assignee must be a Member
-        if (assigneeId) {
+        /* ---------------------------------------------------------
+           4. Validate assignee is an active Member
+        --------------------------------------------------------- */
+        if (finalAssigneeId) {
             const u = await safeQuery(
                 `SELECT id, role FROM users WHERE id = $1 AND is_active = TRUE`,
-                [assigneeId]
+                [finalAssigneeId]
             );
             if (u.rows.length === 0) {
                 return res.status(400).json({
@@ -130,6 +174,9 @@ const createProgramTask = async (req, res) => {
             }
         }
 
+        /* ---------------------------------------------------------
+           5. Insert
+        --------------------------------------------------------- */
         const result = await safeQuery(
             `
             INSERT INTO program_project_tasks (
@@ -154,7 +201,7 @@ const createProgramTask = async (req, res) => {
                 objectives?.trim() || null,
                 status || "To Do",
                 priority || "Medium",
-                assigneeId || null,
+                finalAssigneeId,
                 req.user.id,
                 startDate || null,
                 dueDate || null,
@@ -170,7 +217,9 @@ const createProgramTask = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to create program task.",
-            ...(process.env.NODE_ENV !== "production" && { error: error.message }),
+            ...(process.env.NODE_ENV !== "production" && {
+                error: error.message,
+            }),
         });
     }
 };
