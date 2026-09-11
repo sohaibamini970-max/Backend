@@ -777,6 +777,132 @@ const getMembersList = async (req, res) => {
     }
 };
 
+/* =========================================================
+   GET ALL PROJECTS OVERVIEW (with rollup stats)
+   GET /api/performance/projects
+   - Executive Manager / System Administrator: all projects
+   - Project Manager: only projects they manage
+   - Members: forbidden
+========================================================= */
+
+const getAllProjectsOverview = async (req, res) => {
+    try {
+        const requestingUser = req.user;
+
+        if (
+            !["Project Manager", "Executive Manager", "System Administrator"].includes(
+                requestingUser.role
+            )
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "You don't have permission to view projects overview.",
+            });
+        }
+
+        console.log("📊 Fetching projects overview for:", requestingUser.role);
+
+        let query = `
+            SELECT
+                p.id,
+                p.name,
+                p.description,
+                p.status,
+                p.created_at,
+                p.due_date,
+                pm.id         AS project_manager_id,
+                pm.full_name  AS project_manager_name,
+
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.status IN ('To Do', 'In Progress')
+                )::INTEGER AS pending_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks,
+                COUNT(DISTINCT t.assignee_id)::INTEGER AS member_count,
+
+                ROUND(
+                    COUNT(t.id) FILTER (WHERE t.status = 'Done')::NUMERIC /
+                    NULLIF(COUNT(t.id), 0) * 100,
+                    1
+                )::NUMERIC AS completion_rate
+
+            FROM projects p
+            LEFT JOIN users pm ON p.project_manager_id = pm.id
+            LEFT JOIN tasks t  ON t.project_id = p.id
+        `;
+
+        const params = [];
+        const conditions = [];
+
+        if (requestingUser.role === "Project Manager") {
+            conditions.push(`p.project_manager_id = $${params.length + 1}`);
+            params.push(requestingUser.id);
+        }
+
+        if (conditions.length > 0) {
+            query += ` WHERE ` + conditions.join(" AND ");
+        }
+
+        query += `
+            GROUP BY p.id, pm.id, pm.full_name
+            ORDER BY p.created_at DESC
+        `;
+
+        const result = await safeQuery(query, params);
+
+        const projects = result.rows.map((row) => {
+            const total = parseInt(row.total_tasks || 0);
+            const completed = parseInt(row.completed_tasks || 0);
+            const isCompleted = total > 0 && completed === total;
+
+            return {
+                id: row.id,
+                name: row.name,
+                description: row.description,
+                status: isCompleted ? "Completed" : row.status || "Active",
+                raw_status: row.status,
+                created_at: row.created_at,
+                due_date: row.due_date,
+                project_manager_id: row.project_manager_id,
+                project_manager_name: row.project_manager_name,
+                total_tasks: total,
+                completed_tasks: completed,
+                pending_tasks: parseInt(row.pending_tasks || 0),
+                overdue_tasks: parseInt(row.overdue_tasks || 0),
+                member_count: parseInt(row.member_count || 0),
+                completion_rate: parseFloat(row.completion_rate || 0),
+                is_completed: isCompleted,
+            };
+        });
+
+        const completedProjects = projects.filter((p) => p.is_completed).length;
+
+        return res.status(200).json({
+            success: true,
+            projects,
+            count: projects.length,
+            summary: {
+                total_projects: projects.length,
+                completed_projects: completedProjects,
+                active_projects: projects.length - completedProjects,
+                total_tasks: projects.reduce((s, p) => s + p.total_tasks, 0),
+                completed_tasks: projects.reduce((s, p) => s + p.completed_tasks, 0),
+                overdue_tasks: projects.reduce((s, p) => s + p.overdue_tasks, 0),
+            },
+        });
+    } catch (error) {
+        console.error("❌ Get projects overview error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve projects overview.",
+            ...(process.env.NODE_ENV !== "production" && { error: error.message }),
+        });
+    }
+};
+
 module.exports = {
     getMemberPerformance,
     getTeamPerformance,
@@ -785,4 +911,5 @@ module.exports = {
     getTaskHistory,
     getAllMembersPerformance, 
     getMembersList,           
+    getAllProjectsOverview, 
 };
