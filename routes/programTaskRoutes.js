@@ -19,6 +19,10 @@ const {
     downloadInstructionFile,
     previewInstructionFile,
     deleteInstructionFile,
+    assignProgramProjectMembers,
+    getProgramProjectMembers,
+    getMyProgramProjects,
+    getMyProgramProjectTasks,
 } = require("../controllers/programTaskController");
 
 const {
@@ -37,10 +41,6 @@ const {
     getProgramTaskSubmissions,
     createProgramTaskSubmission,
     deleteProgramTaskSubmission,
-    assignProgramProjectMembers,
-    getProgramProjectMembers,
-    getMyProgramProjects,
-    getMyProgramProjectTasks,
 } = require("../controllers/programTaskChildControllers");
 
 const upload = multer({ storage: multer.memoryStorage() });
