@@ -496,19 +496,58 @@ const updateProgramTaskStatus = async (req, res) => {
             });
         }
 
-        await safeQuery(
-            `
-            UPDATE program_project_tasks
-            SET status = $1,
-                updated_at = CURRENT_TIMESTAMP,
-                completed_at = CASE
-                    WHEN $1 = 'Done' THEN CURRENT_TIMESTAMP
-                    ELSE completed_at
-                END
-            WHERE id = $2
-            `,
-            [status, taskId]
-        );
+        // Member setting Completed → require at least one work part
+if (req.user.role === "Member" && status === "Completed") {
+    const evidence = await safeQuery(
+        `
+        SELECT
+            (SELECT COUNT(*)::int
+             FROM program_task_work_parts
+             WHERE program_task_id = $1) AS part_count,
+            (SELECT COUNT(*)::int
+             FROM program_task_work_parts
+             WHERE program_task_id = $1 AND status = 'Done') AS done_part_count,
+            (SELECT COUNT(*)::int
+             FROM program_task_submissions
+             WHERE program_task_id = $1
+               AND link IS NOT NULL
+               AND TRIM(link) <> '') AS link_count
+        `,
+        [taskId]
+    );
+
+    const { part_count, done_part_count, link_count } = evidence.rows[0];
+
+    if (part_count === 0) {
+        return res.status(400).json({
+            success: false,
+            message:
+                "Add at least one work part before marking this task as Completed.",
+        });
+    }
+
+    if (done_part_count === 0 && link_count === 0) {
+        return res.status(400).json({
+            success: false,
+            message:
+                "At least one work part must be Done, or one submission link provided.",
+        });
+    }
+}
+
+              await safeQuery(
+                `
+                UPDATE program_project_tasks
+                SET status = $1::varchar,
+                    updated_at = CURRENT_TIMESTAMP,
+                    completed_at = CASE
+                        WHEN $1::varchar = 'Done' THEN CURRENT_TIMESTAMP
+                        ELSE completed_at
+                    END
+                WHERE id = $2
+                `,
+                [status, taskId]
+            );
 
         return res.status(200).json({
             success: true,
