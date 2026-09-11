@@ -532,16 +532,26 @@ const createPerformanceSnapshot = async (req, res) => {
    - Manager/Admin: all tasks (optionally filtered by project)
 ========================================================= */
 
+/* =========================================================
+   GET TASK HISTORY
+   GET /api/performance/history
+   - Member: their own tasks
+   - Project Manager: only tasks inside their projects
+   - Executive Manager / System Administrator: all tasks
+     (optionally filtered by ?userId=)
+========================================================= */
+
 const getTaskHistory = async (req, res) => {
     try {
         const requestingUser = req.user;
         const { limit = 50, userId } = req.query;
 
-        const isManagerOrAdmin = [
-            "Project Manager",
+        const isExecOrAdmin = [
             "Executive Manager",
             "System Administrator",
         ].includes(requestingUser.role);
+
+        const isPM = requestingUser.role === "Project Manager";
 
         let query = `
             SELECT
@@ -564,14 +574,28 @@ const getTaskHistory = async (req, res) => {
         const params = [];
         const conditions = [];
 
-        // Members: only their own tasks
-        if (!isManagerOrAdmin) {
+        if (isExecOrAdmin) {
+            // Exec / Admin: all tasks, optionally filter to one member
+            if (userId) {
+                conditions.push(`t.assignee_id = $${params.length + 1}`);
+                params.push(userId);
+            }
+        } else if (isPM) {
+            // PM: only tasks inside their own projects
+            conditions.push(
+                `t.project_id IN (SELECT id FROM projects WHERE project_manager_id = $${params.length + 1})`
+            );
+            params.push(requestingUser.id);
+
+            // PM may additionally filter to one member inside their projects
+            if (userId) {
+                conditions.push(`t.assignee_id = $${params.length + 1}`);
+                params.push(userId);
+            }
+        } else {
+            // Member: only their own tasks
             conditions.push(`t.assignee_id = $${params.length + 1}`);
             params.push(requestingUser.id);
-        } else if (userId) {
-            // Managers can optionally filter a specific member
-            conditions.push(`t.assignee_id = $${params.length + 1}`);
-            params.push(userId);
         }
 
         if (conditions.length > 0) {
@@ -579,7 +603,7 @@ const getTaskHistory = async (req, res) => {
         }
 
         query += `
-            ORDER BY 
+            ORDER BY
                 COALESCE(t.completed_at, t.updated_at, t.created_at) DESC
             LIMIT $${params.length + 1}
         `;
@@ -601,17 +625,22 @@ const getTaskHistory = async (req, res) => {
         });
     }
 };
+/* =========================================================
+   GET ALL MEMBERS AGGREGATE PERFORMANCE (Manager default view)
+   GET /api/performance/all
+========================================================= */
 
 /* =========================================================
    GET ALL MEMBERS AGGREGATE PERFORMANCE (Manager default view)
    GET /api/performance/all
+   - Executive Manager / System Administrator: all members' tasks
+   - Project Manager: only tasks inside their own projects
 ========================================================= */
 
 const getAllMembersPerformance = async (req, res) => {
     try {
         const requestingUser = req.user;
 
-        // Only managers and admins
         if (
             !["Project Manager", "Executive Manager", "System Administrator"].includes(
                 requestingUser.role
@@ -623,7 +652,18 @@ const getAllMembersPerformance = async (req, res) => {
             });
         }
 
-        // Aggregate stats across all members
+        // Build a reusable scope condition for PM
+        const isPM = requestingUser.role === "Project Manager";
+        const pmId = requestingUser.id;
+
+        // We inject this fragment into every aggregate query.
+        // For Exec/Admin it's a no-op; for PM it scopes to their projects.
+        const scopeClause = isPM
+            ? ` AND t.project_id IN (SELECT id FROM projects WHERE project_manager_id = $1) `
+            : ` `;
+        const scopeParams = isPM ? [pmId] : [];
+
+        // ---- Aggregate stats ----
         const statsResult = await safeQuery(
             `
             SELECT
@@ -663,29 +703,38 @@ const getAllMembersPerformance = async (req, res) => {
             FROM tasks t
             LEFT JOIN users u ON t.assignee_id = u.id
             WHERE u.role = 'Member'
-            `
+            ${scopeClause}
+            `,
+            scopeParams
         );
 
+        // ---- Status breakdown ----
         const statusBreakdown = await safeQuery(
             `
             SELECT t.status, COUNT(*)::INTEGER AS count
             FROM tasks t
             JOIN users u ON t.assignee_id = u.id
             WHERE u.role = 'Member'
+            ${scopeClause}
             GROUP BY t.status
-            `
+            `,
+            scopeParams
         );
 
+        // ---- Priority breakdown ----
         const priorityBreakdown = await safeQuery(
             `
             SELECT t.priority, COUNT(*)::INTEGER AS count
             FROM tasks t
             JOIN users u ON t.assignee_id = u.id
             WHERE u.role = 'Member'
+            ${scopeClause}
             GROUP BY t.priority
-            `
+            `,
+            scopeParams
         );
 
+        // ---- Project breakdown ----
         const projectBreakdown = await safeQuery(
             `
             SELECT
@@ -700,9 +749,11 @@ const getAllMembersPerformance = async (req, res) => {
             JOIN users u ON t.assignee_id = u.id
             JOIN projects p ON t.project_id = p.id
             WHERE u.role = 'Member'
+            ${scopeClause}
             GROUP BY p.id, p.name
             ORDER BY total_tasks DESC
-            `
+            `,
+            scopeParams
         );
 
         const stats = statsResult.rows[0] || {};
