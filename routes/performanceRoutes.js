@@ -10,6 +10,7 @@ const {
     getTaskHistory,
     getAllMembersPerformance,
     getMembersList,
+    getAllProjectsOverview,
 } = require("../controllers/performanceController");
 
 // ... existing routes ...
@@ -22,7 +23,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 
 router.get("/all", authenticate, getAllMembersPerformance);
 router.get("/members-list", authenticate, getMembersList);
-
+router.get("/projects", authenticate, getAllProjectsOverview);
 // ... existing routes ...
 
 router.get("/history", authenticate, getTaskHistory);
