@@ -598,8 +598,21 @@ const getAssignableUsers = async (req, res) => {
             SELECT id, full_name, email, role, job_title
             FROM users
             WHERE is_active = TRUE
-              AND role IN ('Project Manager', 'Executive Manager', 'System Administrator')
-            ORDER BY role ASC, full_name ASC
+              AND role IN (
+                  'Member',
+                  'Project Manager',
+                  'Executive Manager',
+                  'System Administrator'
+              )
+            ORDER BY
+                CASE role
+                    WHEN 'Member' THEN 1
+                    WHEN 'Project Manager' THEN 2
+                    WHEN 'Executive Manager' THEN 3
+                    WHEN 'System Administrator' THEN 4
+                    ELSE 5
+                END,
+                full_name ASC
             `
         );
 
