@@ -81,6 +81,7 @@ const createProgramTask = async (req, res) => {
             name,
             description,
             objectives,
+            instructionsText,     
             status,
             priority,
             assigneeId,
@@ -177,36 +178,38 @@ const createProgramTask = async (req, res) => {
         /* ---------------------------------------------------------
            5. Insert
         --------------------------------------------------------- */
-        const result = await safeQuery(
-            `
-            INSERT INTO program_project_tasks (
-                program_project_id,
-                name,
-                description,
-                objectives,
-                status,
-                priority,
-                assignee_id,
-                created_by,
-                start_date,
-                due_date
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING *
-            `,
-            [
-                programProjectId,
-                name.trim(),
-                description?.trim() || null,
-                objectives?.trim() || null,
-                status || "To Do",
-                priority || "Medium",
-                finalAssigneeId,
-                req.user.id,
-                startDate || null,
-                dueDate || null,
-            ]
-        );
+       const result = await safeQuery(
+    `
+    INSERT INTO program_project_tasks (
+        program_project_id,
+        name,
+        description,
+        objectives,
+        instructions_text,
+        status,
+        priority,
+        assignee_id,
+        created_by,
+        start_date,
+        due_date
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *
+    `,
+    [
+        programProjectId,
+        name.trim(),
+        description?.trim() || null,
+        objectives?.trim() || null,
+        instructionsText?.trim() || null,   // ← new
+        status || "To Do",
+        priority || "Medium",
+        finalAssigneeId,
+        req.user.id,
+        startDate || null,
+        dueDate || null,
+    ]
+);
 
         return res.status(201).json({
             success: true,
