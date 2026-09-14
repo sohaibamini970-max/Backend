@@ -18,6 +18,7 @@ const performanceRoutes = require("./routes/performanceRoutes");
 const taskWorkPartRoutes = require('./routes/taskworkpartroutes');
 const programTaskRoutes = require("./routes/programTaskRoutes");
 const programAIRoutes = require("./routes/programAIRoutes");
+const programReportRoutes = require("./routes/programReportRoutes");
 
 const app = express();
 
@@ -105,6 +106,7 @@ app.use("/api/programs", require("./routes/programRoutes"));
 app.use('/api', taskWorkPartRoutes);
 app.use("/api/program-tasks", programTaskRoutes);
 app.use("/api/ai", programAIRoutes);
+app.use("/api/program-reports", programReportRoutes);
 // ============================================================
 // 404 HANDLER
 // ============================================================
