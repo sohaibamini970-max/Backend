@@ -26,6 +26,34 @@ const safeQuery = async (text, params) => {
     }
 };
 
+/* ---------------------------------------------------------
+   Helper: can this user act on this task?
+   - Managers: yes
+   - Assignee: yes
+   - Any Member of the program project: yes, but ONLY when
+     the task has no assignee (unassigned)
+--------------------------------------------------------- */
+const canInteractWithTask = async (task, user) => {
+    if (isManagementRole(user.role)) return true;
+
+    const isAssignee =
+        task.assignee_id &&
+        String(task.assignee_id) === String(user.id);
+    if (isAssignee) return true;
+
+    // Unassigned task → any member of the program project can act
+    if (!task.assignee_id) {
+        const mem = await safeQuery(
+            `SELECT 1 FROM program_project_members
+             WHERE program_project_id = $1 AND user_id = $2`,
+            [task.program_project_id, user.id]
+        );
+        return mem.rows.length > 0;
+    }
+
+    return false;
+};
+
 /* =========================================================
    CHALLENGES
 ========================================================= */
@@ -35,18 +63,16 @@ const getProgramTaskChallenges = async (req, res) => {
         const { taskId } = req.params;
 
         const t = await safeQuery(
-            `SELECT id, assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Task not found." });
         }
 
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(t.rows[0].assignee_id || "") === String(req.user.id);
-
-        if (!isManager && !isAssignee) {
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -87,16 +113,20 @@ const createProgramTaskChallenge = async (req, res) => {
         }
 
         const t = await safeQuery(
-            `SELECT assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Task not found." });
         }
-        if (String(t.rows[0].assignee_id || "") !== String(req.user.id)) {
+
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
             return res.status(403).json({
                 success: false,
-                message: "You can only add challenges to tasks assigned to you.",
+                message:
+                    "You can only add challenges to tasks assigned to you, or to unassigned tasks in your program project.",
             });
         }
 
@@ -161,17 +191,16 @@ const uploadProgramTaskAttachment = async (req, res) => {
         }
 
         const t = await safeQuery(
-            `SELECT id, assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Task not found." });
         }
 
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(t.rows[0].assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -211,16 +240,16 @@ const getProgramTaskAttachments = async (req, res) => {
         const { taskId } = req.params;
 
         const t = await safeQuery(
-            `SELECT assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Task not found." });
         }
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(t.rows[0].assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -249,7 +278,7 @@ const downloadProgramTaskAttachment = async (req, res) => {
         const { attachmentId } = req.params;
         const r = await safeQuery(
             `
-            SELECT a.*, t.assignee_id
+            SELECT a.*, t.assignee_id, t.program_project_id
             FROM program_task_attachments a
             INNER JOIN program_project_tasks t ON t.id = a.program_task_id
             WHERE a.id = $1
@@ -260,9 +289,12 @@ const downloadProgramTaskAttachment = async (req, res) => {
             return res.status(404).json({ success: false, message: "Not found." });
         }
         const f = r.rows[0];
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee = String(f.assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+
+        const allowed = await canInteractWithTask(
+            { assignee_id: f.assignee_id, program_project_id: f.program_project_id },
+            req.user
+        );
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -288,7 +320,7 @@ const previewProgramTaskAttachment = async (req, res) => {
         const { attachmentId } = req.params;
         const r = await safeQuery(
             `
-            SELECT a.*, t.assignee_id
+            SELECT a.*, t.assignee_id, t.program_project_id
             FROM program_task_attachments a
             INNER JOIN program_project_tasks t ON t.id = a.program_task_id
             WHERE a.id = $1
@@ -299,9 +331,12 @@ const previewProgramTaskAttachment = async (req, res) => {
             return res.status(404).json({ success: false, message: "Not found." });
         }
         const f = r.rows[0];
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee = String(f.assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+
+        const allowed = await canInteractWithTask(
+            { assignee_id: f.assignee_id, program_project_id: f.program_project_id },
+            req.user
+        );
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -359,6 +394,21 @@ const deleteProgramTaskAttachment = async (req, res) => {
 const getProgramTaskWorkParts = async (req, res) => {
     try {
         const { taskId } = req.params;
+
+        const t = await safeQuery(
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
+            [taskId]
+        );
+        if (t.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Task not found." });
+        }
+
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
+            return res.status(403).json({ success: false, message: "Not authorized." });
+        }
+
         const r = await safeQuery(
             `
             SELECT w.*, u.full_name AS creator_name, u.email AS creator_email, u.role AS creator_role
@@ -382,7 +432,8 @@ const createProgramTaskWorkPart = async (req, res) => {
         const { title, description, status } = req.body;
 
         const t = await safeQuery(
-            `SELECT id, assignee_id, status FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, status, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
@@ -390,9 +441,8 @@ const createProgramTaskWorkPart = async (req, res) => {
         }
         const task = t.rows[0];
 
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee = String(task.assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+        const allowed = await canInteractWithTask(task, req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
         if (!title || !title.trim()) {
@@ -437,17 +487,19 @@ const updateProgramTaskWorkPartStatus = async (req, res) => {
         }
 
         const part = r.rows[0];
-        const isManager = isManagementRole(req.user.role);
-        const isCreator = String(part.created_by) === String(req.user.id);
 
         const t = await safeQuery(
-            `SELECT assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [part.program_task_id]
         );
-        const isAssignee =
-            String(t.rows[0]?.assignee_id || "") === String(req.user.id);
 
-        if (!isManager && !isCreator && !isAssignee) {
+        const isCreator = String(part.created_by) === String(req.user.id);
+        const canInteract = t.rows[0]
+            ? await canInteractWithTask(t.rows[0], req.user)
+            : false;
+
+        if (!isCreator && !canInteract) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -503,16 +555,16 @@ const getProgramTaskSubmissions = async (req, res) => {
         const { taskId } = req.params;
 
         const t = await safeQuery(
-            `SELECT assignee_id FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Task not found." });
         }
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(t.rows[0].assignee_id || "") === String(req.user.id);
-        if (!isManager && !isAssignee) {
+
+        const allowed = await canInteractWithTask(t.rows[0], req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
@@ -540,7 +592,8 @@ const createProgramTaskSubmission = async (req, res) => {
         const { link, description } = req.body;
 
         const t = await safeQuery(
-            `SELECT id, assignee_id, status FROM program_project_tasks WHERE id = $1`,
+            `SELECT id, assignee_id, status, program_project_id
+             FROM program_project_tasks WHERE id = $1`,
             [taskId]
         );
         if (t.rows.length === 0) {
@@ -548,10 +601,12 @@ const createProgramTaskSubmission = async (req, res) => {
         }
         const task = t.rows[0];
 
-        if (String(task.assignee_id || "") !== String(req.user.id)) {
+        const allowed = await canInteractWithTask(task, req.user);
+        if (!allowed) {
             return res.status(403).json({
                 success: false,
-                message: "Only the assignee can submit work.",
+                message:
+                    "Only the assignee, or members of the program project (on an unassigned task), can submit work.",
             });
         }
         if (task.status === "Done") {
