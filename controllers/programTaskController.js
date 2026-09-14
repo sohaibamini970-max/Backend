@@ -25,6 +25,33 @@ const safeQuery = async (text, params) => {
     }
 };
 
+/* ---------------------------------------------------------
+   Helper: can this user act on this task?
+   - Managers: yes
+   - Assignee: yes
+   - Any Member of the program project: yes, but ONLY when
+     the task has no assignee (unassigned)
+--------------------------------------------------------- */
+const canInteractWithTask = async (task, user) => {
+    if (isManagementRole(user.role)) return true;
+
+    const isAssignee =
+        task.assignee_id &&
+        String(task.assignee_id) === String(user.id);
+    if (isAssignee) return true;
+
+    if (!task.assignee_id) {
+        const mem = await safeQuery(
+            `SELECT 1 FROM program_project_members
+             WHERE program_project_id = $1 AND user_id = $2`,
+            [task.program_project_id, user.id]
+        );
+        return mem.rows.length > 0;
+    }
+
+    return false;
+};
+
 const isManagementRole = (role) => MANAGEMENT_ROLES.includes(role);
 
 /* =========================================================
@@ -60,20 +87,6 @@ const canManageProgramProject = async (user, programProject) => {
     }
     return false;
 };
-
-/* =========================================================
-   CREATE PROGRAM TASK
-   POST /api/program-tasks/program-project/:programProjectId
-========================================================= */
-
-/* =========================================================
-   CREATE PROGRAM TASK
-   POST /api/program-tasks/program-project/:programProjectId
-   - Managers: full create, can assign to any Member
-   - Members: allowed only if they belong to the program project,
-              and the task is auto-assigned to themselves
-========================================================= */
-
 const createProgramTask = async (req, res) => {
     try {
         const { programProjectId } = req.params;
@@ -396,16 +409,10 @@ const getProgramTaskById = async (req, res) => {
             });
         }
 
-        const pp = await getProgramProject(task.program_project_id);
-
         const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(task.assignee_id || "") === String(req.user.id);
-        const isOwnerPM =
-            req.user.role === "Project Manager" &&
-            String(pp?.assigned_to) === String(req.user.id);
+        const allowed = await canInteractWithTask(task, req.user);
 
-        if (!isManager && !isAssignee && !isOwnerPM) {
+        if (!isManager && !allowed) {
             return res.status(403).json({
                 success: false,
                 message: "Not authorized to view this program task.",
@@ -470,11 +477,10 @@ const updateProgramTaskStatus = async (req, res) => {
             });
         }
 
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(task.assignee_id || "") === String(req.user.id);
-
-        if (!isManager && !isAssignee) {
+       const isManager = isManagementRole(req.user.role);
+        const allowed = await canInteractWithTask(task, req.user);
+        
+        if (!isManager && !allowed) {
             return res.status(403).json({
                 success: false,
                 message: "Not authorized to change this task.",
@@ -804,14 +810,13 @@ const getInstructionFiles = async (req, res) => {
             });
         }
 
-        const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(task.assignee_id || "") === String(req.user.id);
-
-        if (!isManager && !isAssignee) {
+       const isManager = isManagementRole(req.user.role);
+        const allowed = await canInteractWithTask(task, req.user);
+        
+        if (!isManager && !allowed) {
             return res.status(403).json({
                 success: false,
-                message: "Not authorized.",
+                message: "Not authorized to change this task.",
             });
         }
 
@@ -863,13 +868,12 @@ const downloadInstructionFile = async (req, res) => {
         const file = r.rows[0];
 
         const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(file.assignee_id || "") === String(req.user.id);
-
-        if (!isManager && !isAssignee) {
+        const allowed = await canInteractWithTask(task, req.user);
+        
+        if (!isManager && !allowed) {
             return res.status(403).json({
                 success: false,
-                message: "Not authorized.",
+                message: "Not authorized to change this task.",
             });
         }
 
@@ -916,13 +920,12 @@ const previewInstructionFile = async (req, res) => {
 
         const file = r.rows[0];
         const isManager = isManagementRole(req.user.role);
-        const isAssignee =
-            String(file.assignee_id || "") === String(req.user.id);
-
-        if (!isManager && !isAssignee) {
+        const allowed = await canInteractWithTask(task, req.user);
+        
+        if (!isManager && !allowed) {
             return res.status(403).json({
                 success: false,
-                message: "Not authorized.",
+                message: "Not authorized to change this task.",
             });
         }
 
