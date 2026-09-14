@@ -3,8 +3,8 @@ const express = require("express");
 const router = express.Router();
 
 const { handleProgramAIAgent } = require("../controllers/aiProgramAgentController");
-const { verifyToken } = require("../middleware/auth"); // adjust to your auth middleware
+const { authenticate } = require("../middleware/authMiddleware"); 
 
-router.post("/program-agent", verifyToken, handleProgramAIAgent);
+router.post("/program-agent", authenticate, handleProgramAIAgent);
 
 module.exports = router;
