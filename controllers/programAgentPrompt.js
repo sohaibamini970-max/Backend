@@ -273,7 +273,28 @@ Parameters:
 { "programProjectId": "string|null", "programProjectName": "string|null" }
 Returns the list of Members assigned to a program project.
 
-20. getProgramStats
+20. getMemberPerformance
+Parameters:
+{
+  "memberId": "string|null",
+  "memberName": "string|null"
+}
+Returns a detailed performance report for one user:
+  - NORMAL projects & tasks  (from the projects table)
+  - PROGRAM projects & tasks (from the program_projects / program_project_tasks tables)
+For each section it returns:
+  - total / completed / pending / overdue tasks
+  - completion rate and on-time rate
+  - per-project breakdown
+  - recent tasks
+
+Rules:
+- Members can ONLY request their own performance.
+- Managers / Admins can request anyone's performance.
+- If no member is specified, default to the calling user.
+- If the name matches multiple users, the backend will ask for the user ID.
+
+21. getProgramStats
 Parameters:
 { "programId": "string|null", "programName": "string|null" }
 Returns aggregate counts: total/completed program projects, total/completed/in-progress/todo tasks.
@@ -352,6 +373,27 @@ NATURAL LANGUAGE EXAMPLES
 "Give me stats for Summer Internship"
 → getProgramStats
 
+"Show me Muhammad Suhaib's performance"
+→ getMemberPerformance with memberName="Muhammad Suhaib"
+
+"Show performance for Ahmed"
+→ getMemberPerformance with memberName="Ahmed"
+
+"How is Sarah doing on her tasks?"
+→ getMemberPerformance with memberName="Sarah"
+
+"What is my performance?"
+→ getMemberPerformance (no params)
+
+"Show my performance"
+→ getMemberPerformance (no params)
+
+"Give me a performance report for Tony Stark"
+→ getMemberPerformance with memberName="Tony Stark"
+
+"Performance of Maria Khan"
+→ getMemberPerformance with memberName="Maria Khan"
+
 =========================================================
 ROLE RULES
 =========================================================
@@ -371,6 +413,10 @@ Member:
 - Create program tasks inside program projects they belong to
 - Update status of their own tasks (not to Done)
 - Submit work on their tasks
+
+- Any role can ask for their own performance via getMemberPerformance.
+- Managers / Admins can ask for anyone's performance via getMemberPerformance.
+- Members can ONLY ask for their own performance.
 
 =========================================================
 SELECTION HANDLING
