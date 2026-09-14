@@ -1613,6 +1613,342 @@ const functions = {
         };
     },
 
+       /* ---------------------------------------------------------
+       PERFORMANCE
+    --------------------------------------------------------- */
+
+    // getMemberPerformance
+    // Returns a full performance snapshot for one user:
+    //   - normal tasks (projects table)
+    //   - program tasks (program_project_tasks table)
+    //   - aggregates + breakdowns + recent history
+    //
+    // Managers/Admins can ask for anyone.
+    // Members can only ask for themselves.
+    getMemberPerformance: async (params, user) => {
+        const { memberId, memberName } = params || {};
+
+        // Resolve target user
+        let target = null;
+
+        if (memberId) {
+            const r = await safeQuery(
+                `SELECT id, full_name, email, role FROM users
+                 WHERE id = $1 AND is_active = TRUE`,
+                [memberId]
+            );
+            target = r.rows[0] || null;
+        } else if (memberName) {
+            // Accept any active role for performance lookup
+            const exact = await safeQuery(
+                `SELECT id, full_name, email, role FROM users
+                 WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+                   AND is_active = TRUE`,
+                [memberName]
+            );
+            if (exact.rows.length === 1) {
+                target = exact.rows[0];
+            } else if (exact.rows.length > 1) {
+                return {
+                    success: false,
+                    requiresAssigneeSelection: true,
+                    multipleAssignees: true,
+                    members: exact.rows.map(u => ({
+                        id: u.id,
+                        fullName: u.full_name,
+                        email: u.email,
+                        role: u.role,
+                    })),
+                    message: `Multiple users match "${memberName}". Please provide the user ID.`,
+                };
+            } else {
+                const partial = await safeQuery(
+                    `SELECT id, full_name, email, role FROM users
+                     WHERE LOWER(full_name) LIKE LOWER($1)
+                       AND is_active = TRUE
+                     ORDER BY full_name LIMIT 6`,
+                    [`%${memberName.toLowerCase().trim()}%`]
+                );
+                if (partial.rows.length === 1) {
+                    target = partial.rows[0];
+                } else if (partial.rows.length > 1) {
+                    return {
+                        success: false,
+                        requiresAssigneeSelection: true,
+                        multipleAssignees: true,
+                        members: partial.rows.map(u => ({
+                            id: u.id,
+                            fullName: u.full_name,
+                            email: u.email,
+                            role: u.role,
+                        })),
+                        message: `Multiple users match "${memberName}". Please provide the user ID.`,
+                    };
+                }
+            }
+        } else {
+            // Default to the calling user
+            const r = await safeQuery(
+                `SELECT id, full_name, email, role FROM users
+                 WHERE id = $1 AND is_active = TRUE`,
+                [user.id]
+            );
+            target = r.rows[0] || null;
+        }
+
+        if (!target) {
+            return {
+                success: false,
+                error: `No user found${memberName ? ` matching "${memberName}"` : ""}.`,
+            };
+        }
+
+        // Authorization: members can only see themselves
+        if (user.role === "Member" && String(user.id) !== String(target.id)) {
+            return {
+                success: false,
+                error: "Members can only view their own performance.",
+            };
+        }
+
+        // =========================================================
+        // NORMAL TASK PERFORMANCE
+        // =========================================================
+
+        const normalStats = await safeQuery(
+            `
+            SELECT
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (WHERE t.status IN ('To Do', 'In Progress'))::INTEGER AS pending_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.status = 'Done'
+                      AND t.completed_at IS NOT NULL
+                      AND t.due_date IS NOT NULL
+                      AND t.completed_at::DATE > t.due_date::DATE
+                )::INTEGER AS overdue_done_tasks,
+                COUNT(DISTINCT t.project_id)::INTEGER AS project_count,
+                ROUND(
+                    COUNT(t.id) FILTER (WHERE t.status = 'Done')::NUMERIC /
+                    NULLIF(COUNT(t.id), 0) * 100, 1
+                )::NUMERIC AS completion_rate,
+                ROUND(
+                    COUNT(t.id) FILTER (
+                        WHERE t.status = 'Done'
+                          AND t.completed_at IS NOT NULL
+                          AND (t.due_date IS NULL OR t.completed_at::DATE <= t.due_date::DATE)
+                    )::NUMERIC /
+                    NULLIF(COUNT(t.id) FILTER (WHERE t.status = 'Done'), 0) * 100, 1
+                )::NUMERIC AS on_time_rate
+            FROM tasks t
+            WHERE t.assignee_id = $1
+            `,
+            [target.id]
+        );
+
+        const normalStatusBreakdown = await safeQuery(
+            `
+            SELECT status, COUNT(*)::INTEGER AS count
+            FROM tasks
+            WHERE assignee_id = $1
+            GROUP BY status
+            `,
+            [target.id]
+        );
+
+        const normalPriorityBreakdown = await safeQuery(
+            `
+            SELECT priority, COUNT(*)::INTEGER AS count
+            FROM tasks
+            WHERE assignee_id = $1
+            GROUP BY priority
+            `,
+            [target.id]
+        );
+
+        const normalProjectBreakdown = await safeQuery(
+            `
+            SELECT
+                p.id AS project_id,
+                p.name AS project_name,
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks
+            FROM tasks t
+            JOIN projects p ON p.id = t.project_id
+            WHERE t.assignee_id = $1
+            GROUP BY p.id, p.name
+            ORDER BY total_tasks DESC
+            `,
+            [target.id]
+        );
+
+        const normalRecent = await safeQuery(
+            `
+            SELECT
+                t.id, t.name, t.status, t.priority,
+                t.due_date, t.completed_at, t.updated_at,
+                p.name AS project_name
+            FROM tasks t
+            JOIN projects p ON p.id = t.project_id
+            WHERE t.assignee_id = $1
+            ORDER BY COALESCE(t.completed_at, t.updated_at, t.created_at) DESC
+            LIMIT 10
+            `,
+            [target.id]
+        );
+
+        // =========================================================
+        // PROGRAM TASK PERFORMANCE
+        // =========================================================
+
+        const programStats = await safeQuery(
+            `
+            SELECT
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.status IN ('To Do', 'In Progress', 'Completed')
+                )::INTEGER AS pending_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.status = 'Done'
+                      AND t.completed_at IS NOT NULL
+                      AND t.due_date IS NOT NULL
+                      AND t.completed_at::DATE > t.due_date::DATE
+                )::INTEGER AS overdue_done_tasks,
+                COUNT(DISTINCT t.program_project_id)::INTEGER AS program_project_count,
+                ROUND(
+                    COUNT(t.id) FILTER (WHERE t.status = 'Done')::NUMERIC /
+                    NULLIF(COUNT(t.id), 0) * 100, 1
+                )::NUMERIC AS completion_rate,
+                ROUND(
+                    COUNT(t.id) FILTER (
+                        WHERE t.status = 'Done'
+                          AND t.completed_at IS NOT NULL
+                          AND (t.due_date IS NULL OR t.completed_at::DATE <= t.due_date::DATE)
+                    )::NUMERIC /
+                    NULLIF(COUNT(t.id) FILTER (WHERE t.status = 'Done'), 0) * 100, 1
+                )::NUMERIC AS on_time_rate
+            FROM program_project_tasks t
+            WHERE t.assignee_id = $1
+            `,
+            [target.id]
+        );
+
+        const programStatusBreakdown = await safeQuery(
+            `
+            SELECT status, COUNT(*)::INTEGER AS count
+            FROM program_project_tasks
+            WHERE assignee_id = $1
+            GROUP BY status
+            `,
+            [target.id]
+        );
+
+        const programPriorityBreakdown = await safeQuery(
+            `
+            SELECT priority, COUNT(*)::INTEGER AS count
+            FROM program_project_tasks
+            WHERE assignee_id = $1
+            GROUP BY priority
+            `,
+            [target.id]
+        );
+
+        const programProjectBreakdown = await safeQuery(
+            `
+            SELECT
+                pp.id AS program_project_id,
+                pp.name AS program_project_name,
+                pg.name AS program_name,
+                COUNT(t.id)::INTEGER AS total_tasks,
+                COUNT(t.id) FILTER (WHERE t.status = 'Done')::INTEGER AS completed_tasks,
+                COUNT(t.id) FILTER (
+                    WHERE t.due_date < CURRENT_DATE AND t.status != 'Done'
+                )::INTEGER AS overdue_tasks
+            FROM program_project_tasks t
+            JOIN program_projects pp ON pp.id = t.program_project_id
+            LEFT JOIN programs pg ON pg.id = pp.program_id
+            WHERE t.assignee_id = $1
+            GROUP BY pp.id, pp.name, pg.name
+            ORDER BY total_tasks DESC
+            `,
+            [target.id]
+        );
+
+        const programRecent = await safeQuery(
+            `
+            SELECT
+                t.id, t.name, t.status, t.priority,
+                t.due_date, t.completed_at, t.updated_at,
+                pp.name AS program_project_name,
+                pg.name AS program_name
+            FROM program_project_tasks t
+            JOIN program_projects pp ON pp.id = t.program_project_id
+            LEFT JOIN programs pg ON pg.id = pp.program_id
+            WHERE t.assignee_id = $1
+            ORDER BY COALESCE(t.completed_at, t.updated_at, t.created_at) DESC
+            LIMIT 10
+            `,
+            [target.id]
+        );
+
+        const n = normalStats.rows[0] || {};
+        const p = programStats.rows[0] || {};
+
+        return {
+            success: true,
+            target: {
+                id: target.id,
+                fullName: target.full_name,
+                email: target.email,
+                role: target.role,
+            },
+
+            normal: {
+                stats: {
+                    totalTasks: parseInt(n.total_tasks || 0),
+                    completedTasks: parseInt(n.completed_tasks || 0),
+                    pendingTasks: parseInt(n.pending_tasks || 0),
+                    overdueTasks: parseInt(n.overdue_tasks || 0),
+                    overdueDoneTasks: parseInt(n.overdue_done_tasks || 0),
+                    projectCount: parseInt(n.project_count || 0),
+                    completionRate: parseFloat(n.completion_rate || 0),
+                    onTimeRate: parseFloat(n.on_time_rate || 0),
+                },
+                statusBreakdown: normalStatusBreakdown.rows,
+                priorityBreakdown: normalPriorityBreakdown.rows,
+                projectBreakdown: normalProjectBreakdown.rows,
+                recentTasks: normalRecent.rows,
+            },
+
+            program: {
+                stats: {
+                    totalTasks: parseInt(p.total_tasks || 0),
+                    completedTasks: parseInt(p.completed_tasks || 0),
+                    pendingTasks: parseInt(p.pending_tasks || 0),
+                    overdueTasks: parseInt(p.overdue_tasks || 0),
+                    overdueDoneTasks: parseInt(p.overdue_done_tasks || 0),
+                    programProjectCount: parseInt(p.program_project_count || 0),
+                    completionRate: parseFloat(p.completion_rate || 0),
+                    onTimeRate: parseFloat(p.on_time_rate || 0),
+                },
+                statusBreakdown: programStatusBreakdown.rows,
+                priorityBreakdown: programPriorityBreakdown.rows,
+                programProjectBreakdown: programProjectBreakdown.rows,
+                recentTasks: programRecent.rows,
+            },
+        };
+    },
+
     // getProgramTaskInfo (stats)
     getProgramStats: async (params, user) => {
         const { programId, programName } = params || {};
@@ -1956,6 +2292,55 @@ const formatMessage = (item) => {
                     )
                     .join("\n")
             );
+        }
+
+                  case "getMemberPerformance": {
+            const t = result.target || {};
+            const nStats = result.normal?.stats || {};
+            const pStats = result.program?.stats || {};
+
+            const normalProjects = result.normal?.projectBreakdown || [];
+            const programProjects = result.program?.programProjectBreakdown || [];
+
+            let msg = `📊 Performance — ${t.fullName || "User"} (${t.role || ""})\n`;
+
+            msg += `\n── NORMAL PROJECTS & TASKS ──\n`;
+            msg += `   • Total tasks: ${nStats.totalTasks}\n`;
+            msg += `   • Completed: ${nStats.completedTasks}\n`;
+            msg += `   • Pending: ${nStats.pendingTasks}\n`;
+            msg += `   • Overdue: ${nStats.overdueTasks}\n`;
+            msg += `   • Completion rate: ${nStats.completionRate}%\n`;
+            msg += `   • On-time rate: ${nStats.onTimeRate}%\n`;
+            msg += `   • Projects involved: ${nStats.projectCount}\n`;
+
+            if (normalProjects.length) {
+                msg += `\n   Per project:\n`;
+                normalProjects.slice(0, 5).forEach((pr) => {
+                    msg += `      - ${pr.project_name}: ${pr.completed_tasks}/${pr.total_tasks} done` +
+                           (pr.overdue_tasks > 0 ? ` (${pr.overdue_tasks} overdue)` : "") + `\n`;
+                });
+            }
+
+            msg += `\n── PROGRAM PROJECTS & TASKS ──\n`;
+            msg += `   • Total program tasks: ${pStats.totalTasks}\n`;
+            msg += `   • Completed: ${pStats.completedTasks}\n`;
+            msg += `   • Pending: ${pStats.pendingTasks}\n`;
+            msg += `   • Overdue: ${pStats.overdueTasks}\n`;
+            msg += `   • Completion rate: ${pStats.completionRate}%\n`;
+            msg += `   • On-time rate: ${pStats.onTimeRate}%\n`;
+            msg += `   • Program projects involved: ${pStats.programProjectCount}\n`;
+
+            if (programProjects.length) {
+                msg += `\n   Per program project:\n`;
+                programProjects.slice(0, 5).forEach((pr) => {
+                    msg += `      - ${pr.program_project_name}` +
+                           (pr.program_name ? ` (${pr.program_name})` : "") +
+                           `: ${pr.completed_tasks}/${pr.total_tasks} done` +
+                           (pr.overdue_tasks > 0 ? ` (${pr.overdue_tasks} overdue)` : "") + `\n`;
+                });
+            }
+
+            return msg.trim();
         }
 
         case "getProgramTaskById": {
